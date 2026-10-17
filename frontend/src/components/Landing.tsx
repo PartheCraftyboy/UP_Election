@@ -28,20 +28,70 @@ interface LandingProps {
 
 const STATES = 4;
 /** Follow strength per 60fps frame. Lower is heavier and smoother. */
-const DAMPING = 0.1;
+const DAMPING = 0.08;
 
 /**
- * The opening formation is a janeu: three cords twisted into one thread. Each
- * cord is a helix about a diagonal axis, and the 2D projection of that helix
- * is what reads as a twist. Strands on the far side of the turn are drawn
- * shorter and fainter, which is what gives the cord its depth.
+ * The opening formation is the act itself: a painted voter's hand lowering a
+ * ballot into the box, with every member of the house wound round the wrist
+ * as a kalawa.
+ *
+ * The hand is a painting, not strands. Tracing it in line segments was tried
+ * and read as scattered dashes, because a hand is a shape people spot as
+ * wrong instantly. So the painting carries the scene and all 403 strands make
+ * the thread, each in its own party colour: the kalawa's red and orange come
+ * out of the house's own composition rather than being painted on.
+ *
+ * On scroll the painting fades out and the thread unwinds into the chamber.
  */
-const JANEU = {
-  axis: 0.92,
-  cords: 3,
-  twists: 3.4,
-  span: 1.25,
-  radius: 0.055
+const HAND_IMAGE = '/scene.png';
+
+/** Fallback until the file loads and reports its own. */
+const HAND_IMAGE_RATIO = 2834 / 2658;
+
+/** Painting width as a fraction of the smaller canvas edge. */
+const HAND_SCENE = 0.96;
+
+/**
+ * The painting is anchored to the right of the viewport and pushed slightly
+ * past it, so the arm's cut edge falls off screen and the hand reads as
+ * reaching in from outside the window rather than from a floating rectangle.
+ */
+const HAND_BLEED = 0.05;
+/** Vertical nudge, as a fraction of the painting's height. */
+const HAND_OFFSET_Y = -0.065;
+
+/**
+ * Where the thread crosses the wrist, as fractions of the PAINTING, not the
+ * canvas: (0, 0) is its top left corner and (1, 1) its bottom right. Tune
+ * these two against the artwork.
+ */
+const HAND_BAND_A: [number, number] = [0.705, 0.1];
+const HAND_BAND_B: [number, number] = [0.755, 0.32];
+
+/**
+ * The thread, as wraps rather than one long helix. Each wrap is the FRONT arc
+ * of an ellipse crossing the wrist, edge to edge, bowed along the arm. The
+ * back of every turn is behind the arm, so it is not drawn at all rather than
+ * drawn faint: that is what makes the thread read as wound round rather than
+ * painted on. Strands taper and fade towards the silhouette, where the thread
+ * curves away out of sight.
+ *
+ * All of it is in fractions of the PAINTING: (0, 0) is its top left corner,
+ * (1, 1) its bottom right. Verified against the artwork before shipping.
+ */
+const KALAWA = {
+  /** Middle of the band, on the bare wrist. */
+  centre: [0.6674, 0.1757] as [number, number],
+  /** Direction along the forearm, radians. */
+  armAngle: -0.28,
+  /** How far the band runs along the arm, as a fraction of painting width. */
+  bandLength: 0.0505,
+  /** Half the arm's thickness here, as a fraction of painting height. */
+  armRadius: 0.0664,
+  /** How much each turn bows along the arm. More reads as rounder. */
+  tilt: 0.4,
+  /** Visible turns of thread. */
+  wraps: 13
 };
 
 const SECTIONS: {
@@ -157,6 +207,23 @@ const easeInOut = (t: number): number =>
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
+/** Where the painting is drawn. The band is positioned against this rect. */
+const imageRect = (
+  canvasW: number,
+  canvasH: number,
+  scale: number,
+  ratio: number
+) => {
+  const w = scale * HAND_SCENE;
+  const h = w / ratio;
+  return {
+    x: canvasW - w * (1 - HAND_BLEED),
+    y: (canvasH - h) / 2 + HAND_OFFSET_Y * h,
+    w,
+    h
+  };
+};
+
 export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -169,6 +236,10 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
   const strandsRef = useRef<Strand[]>([]);
 
   const [active, setActive] = useState(0);
+  const heroImage = useRef<HTMLImageElement | null>(null);
+  const heroReady = useRef(false);
+  const ratioRef = useRef(HAND_IMAGE_RATIO);
+  const [artVersion, setArtVersion] = useState(0);
 
   const reduceMotion = useRef(
     typeof window !== 'undefined' &&
@@ -205,18 +276,13 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         .map((m, i) => i)
         .sort((a, b) => rank(members[a].party) - rank(members[b].party) || a - b);
 
-      // Slot numbers, with one empty column inserted wherever the party
-      // changes, so each block sits apart the way benches do in the chamber.
+      // Members sit in party order with no break between blocks: the colour
+      // change is the boundary, and an empty column reads as a missing bench.
       const seatPos = new Array<number>(members.length);
-      let slot = 0;
-      let previous: PoliticalParty | null = null;
-      seated.forEach((memberIndex) => {
-        const party = members[memberIndex].party;
-        if (previous !== null && party !== previous) slot += rows;
-        previous = party;
-        seatPos[memberIndex] = slot;
-        slot += 1;
+      seated.forEach((memberIndex, position) => {
+        seatPos[memberIndex] = position;
       });
+      const slot = members.length;
       const columns = Math.max(1, Math.ceil(slot / rows));
 
       // Gapless position in party order, so the bloom layers by party the way
@@ -251,32 +317,41 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         const j2 = rnd(i, 2);
         const len = (0.018 + 0.03 * Math.sqrt(member.voters / maxVoters)) * scale;
 
-        // A. the janeu. Three cords, each a helix about the same diagonal.
-        const cord = i % JANEU.cords;
-        const ca = Math.cos(JANEU.axis);
-        const sa = Math.sin(JANEU.axis);
-        const perpX = -sa;
-        const perpY = ca;
-        const phase =
-          cord * ((Math.PI * 2) / JANEU.cords) + u * JANEU.twists * Math.PI * 2;
-        const depth = Math.cos(phase);
-        const offset =
-          Math.sin(phase) * scale * JANEU.radius +
-          (j2 - 0.5) * scale * JANEU.radius * 0.5;
-        const along = (u - 0.5) * scale * JANEU.span;
-        // Tangent of the helix, so each strand lies along its cord.
-        const tangentX =
-          ca * scale * JANEU.span +
-          perpX * depth * scale * JANEU.radius * JANEU.twists * Math.PI * 2;
-        const tangentY =
-          sa * scale * JANEU.span +
-          perpY * depth * scale * JANEU.radius * JANEU.twists * Math.PI * 2;
-        const janeu: [number, number, number, number] = [
-          cx + ca * along + perpX * offset,
-          cy + sa * along + perpY * offset,
+        // A. the kalawa, wound round the wrist. Each member is one piece of
+        // one turn, in its own party colour.
+        const rect = imageRect(w, h, scale, ratioRef.current);
+        const rank = seatRank[i];
+        const armX = Math.cos(KALAWA.armAngle);
+        const armY = Math.sin(KALAWA.armAngle);
+        const acrossX = -armY;
+        const acrossY = armX;
+        const bandLen = KALAWA.bandLength * rect.w;
+        const armHalf = KALAWA.armRadius * rect.h;
+        const lean = KALAWA.tilt * armHalf;
+        const perWrap = members.length / KALAWA.wraps;
+
+        const wrapIndex = Math.min(KALAWA.wraps - 1, Math.floor(rank / perWrap));
+        const within = (rank - wrapIndex * perWrap) / perWrap;
+        // Half a turn only: the other half is behind the arm.
+        const theta = within * Math.PI;
+        const slide = ((wrapIndex + 0.5) / KALAWA.wraps - 0.5) * bandLen;
+        const wrapX = rect.x + KALAWA.centre[0] * rect.w + armX * slide;
+        const wrapY = rect.y + KALAWA.centre[1] * rect.h + armY * slide;
+
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        const tangentX = -acrossX * armHalf * sinT + armX * lean * cosT;
+        const tangentY = -acrossY * armHalf * sinT + armY * lean * cosT;
+
+        // 0 at the arm's silhouette, 1 across the middle of it.
+        const facing = sinT;
+        const kalawa: [number, number, number, number] = [
+          wrapX + acrossX * armHalf * cosT + armX * lean * sinT,
+          wrapY + acrossY * armHalf * cosT + armY * lean * sinT,
           Math.atan2(tangentY, tangentX),
-          len * 0.85 * (0.75 + 0.35 * ((depth + 1) / 2))
+          ((Math.PI * armHalf) / perWrap) * 1.5 * (0.55 + 0.45 * facing)
         ];
+        const cordAlpha = 0.45 + 0.5 * facing;
 
         // B. the chamber arc. The column sets the angle and the row sets the
         // depth, so a party fills a wedge from the floor to the back bench
@@ -295,8 +370,12 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
           len
         ];
 
-        // C. the closed ring, same party order carried round
-        const ringA = su * Math.PI * 2;
+        // C. the closed ring, same party order carried round. Mirrored about
+        // the vertical axis to match the flipped chamber, so the treasury
+        // benches stay on the right across both formations.
+        // Treasury benches open at twelve o'clock and run round to the
+        // right, mirroring the chamber arc below it.
+        const ringA = -Math.PI / 2 + su * Math.PI * 2;
         const ringR = scale * (0.2 + j1 * 0.012);
         const ring: [number, number, number, number] = [
           cx + Math.cos(ringA) * ringR,
@@ -306,8 +385,8 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         ];
 
         // D. the lotus, drawn as petal outlines with a seed pod at the core.
+        // `rank` is the party-order position already read for the hand scene.
         let lotus: [number, number, number, number];
-        const rank = seatRank[i];
         if (rank >= podStart) {
           const k = rank - podStart;
           const podA = (k / LOTUS_POD) * Math.PI * 2;
@@ -343,14 +422,13 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
           lotus = [px, py, Math.atan2(ny - py, nx - px), len * taper * 0.9];
         }
 
-        const colours = PARTY_COLORS[member.party];
         return {
-          f: [janeu, arc, ring, lotus],
+          f: [kalawa, arc, ring, lotus],
           // The party's own colour. A strand is thin, but 403 of them make a
           // field, which is what carries saffron on a light ground.
-          colour: colours?.flag ?? '#8A9B9A',
+          colour: PARTY_COLORS[member.party]?.flag ?? '#8A9B9A',
           alpha: 0.62 + j2 * 0.33,
-          cordAlpha: 0.3 + 0.55 * ((Math.cos(phase) + 1) / 2),
+          cordAlpha,
           phase: rnd(i, 3) * Math.PI * 2
         };
       });
@@ -373,6 +451,17 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     const breathe = reduceMotion.current ? 0 : ts * 0.0006;
 
     ctx.clearRect(0, 0, w, h);
+
+    // The painting, fading out as the chamber takes over.
+    const handPresence = idx === 0 ? 1 - t : 0;
+    const img = heroImage.current;
+    if (handPresence > 0.01 && img && heroReady.current) {
+      const { scale } = anchorRef.current;
+      const rect = imageRect(w, h, scale, ratioRef.current);
+      ctx.globalAlpha = handPresence;
+      ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h);
+      ctx.globalAlpha = 1;
+    }
 
     // The speaker's chair, at the focus of the hemicycle. Fades in with the
     // arc and back out again, so it never floats over the other formations.
@@ -418,6 +507,24 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     ctx.globalAlpha = 1;
   }, []);
 
+  /** The painted opening scene. A missing file is not an error. */
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      heroImage.current = img;
+      heroReady.current = true;
+      if (img.naturalHeight > 0) {
+        ratioRef.current = img.naturalWidth / img.naturalHeight;
+      }
+      // Rebuild the thread against the painting's true proportions.
+      setArtVersion((v) => v + 1);
+    };
+    img.onerror = () => {
+      heroReady.current = false;
+    };
+    img.src = HAND_IMAGE;
+  }, []);
+
   /** Canvas sizing, device pixel ratio aware. */
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -444,7 +551,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [buildStrands, draw]);
+  }, [buildStrands, draw, artVersion]);
 
   /**
    * One continuous loop. Scroll only writes a target; the drawn value chases
@@ -534,10 +641,10 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                     key={item.tab}
                     type="button"
                     onClick={() => onEnter(item.tab)}
-                    className="group flex items-center gap-1.5 text-sm text-stone-600 hover:text-stone-900"
+                    className="group flex items-center gap-1.5 text-sm text-paper hover:text-white"
                   >
                     {item.label}
-                    <span aria-hidden="true" className="text-stone-400 group-hover:text-live-700">
+                    <span aria-hidden="true" className="text-paper/70 group-hover:text-white">
                       &#8599;
                     </span>
                   </button>
