@@ -6,11 +6,11 @@
 @theme {
   /* Cool neutral ramp. Overrides Tailwind's warm stone scale, so the
      existing components re-theme without touching their class names. */
-  --color-stone-50: #F6FAFA;
-  --color-stone-100: #ECF2F2;
-  --color-stone-200: #DCE6E5;
-  --color-stone-300: #C3D2D1;
-  --color-stone-400: #748A89;
+  --color-stone-50: #EAEFEE;
+  --color-stone-100: #E1E8E7;
+  --color-stone-200: #D0DAD9;
+  --color-stone-300: #B9C7C6;
+  --color-stone-400: #6E8483;
   --color-stone-500: #5A6B6B;
   --color-stone-600: #465756;
   --color-stone-700: #354443;
@@ -29,18 +29,25 @@
   --color-live-700: #066566;
   --color-live-800: #054E4F;
 
-  --color-paper: #F6FAFA;
-  --color-panel: #ECF2F2;
-  --color-rule: #DCE6E5;
+  --color-paper: #EAEFEE;
+  --color-panel: #E1E8E7;
+  --color-rule: #D0DAD9;
   --color-ink: #0E1A1A;
 
-  /* Party ink. Data colour, never chrome. Always paired with the party
-     ticker in text so colour is not the only carrier. */
-  --color-bjp: #9A3412;
-  --color-sp: #B91C1C;
-  --color-bsp: #1D4ED8;
-  --color-inc: #047857;
-  --color-sbsp: #6D28D9;
+  /* Party colour, two tiers. `flag` is the party's own colour as Wikipedia's
+     election maps use it; `ink` is the same hue darkened until it clears
+     4.5:1 on both grounds, for text and thin marks. Identity stays in flag,
+     legibility stays in ink, and the ticker is always in text beside it. */
+  --color-bjp-flag: #FF9933;
+  --color-bjp: #A25100;
+  --color-sp-flag: #FF2222;
+  --color-sp: #D20000;
+  --color-bsp-flag: #22409A;
+  --color-bsp: #22409A;
+  --color-inc-flag: #00BFFF;
+  --color-inc: #007095;
+  --color-rld-flag: #006400;
+  --color-rld: #006400;
 
   --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
