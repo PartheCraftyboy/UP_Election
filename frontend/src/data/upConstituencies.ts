@@ -577,15 +577,15 @@ export function generateAll403Constituencies(): Constituency[] {
 export const ALL_CONSTITUENCIES: Constituency[] = generateAll403Constituencies();
 
 export const PARTY_COLORS: Record<PoliticalParty, { bg: string; text: string; hex: string; border: string; glow: string }> = {
-  BJP: { bg: 'bg-orange-100', text: 'text-orange-700', hex: '#ea580c', border: 'border-orange-200', glow: 'none' },
-  SP: { bg: 'bg-red-100', text: 'text-red-700', hex: '#dc2626', border: 'border-red-200', glow: 'none' },
-  BSP: { bg: 'bg-blue-100', text: 'text-blue-700', hex: '#2563eb', border: 'border-blue-200', glow: 'none' },
-  INC: { bg: 'bg-emerald-100', text: 'text-emerald-700', hex: '#059669', border: 'border-emerald-200', glow: 'none' },
-  RLD: { bg: 'bg-amber-100', text: 'text-amber-700', hex: '#d97706', border: 'border-amber-200', glow: 'none' },
-  'AD(S)': { bg: 'bg-purple-100', text: 'text-purple-700', hex: '#9333ea', border: 'border-purple-200', glow: 'none' },
-  NISHAD: { bg: 'bg-cyan-100', text: 'text-cyan-700', hex: '#0891b2', border: 'border-cyan-200', glow: 'none' },
-  SBSP: { bg: 'bg-yellow-100', text: 'text-yellow-700', hex: '#ca8a04', border: 'border-yellow-200', glow: 'none' },
-  'Jansatta Dal': { bg: 'bg-pink-100', text: 'text-pink-700', hex: '#db2777', border: 'border-pink-200', glow: 'none' },
-  IND: { bg: 'bg-stone-100', text: 'text-stone-700', hex: '#57534e', border: 'border-stone-200', glow: 'none' },
-  OTH: { bg: 'bg-neutral-100', text: 'text-neutral-700', hex: '#525252', border: 'border-neutral-200', glow: 'none' }
+  BJP: { bg: 'bg-orange-100', text: 'text-orange-700', hex: '#9A3412', border: 'border-orange-200', glow: 'none' },
+  SP: { bg: 'bg-red-100', text: 'text-red-700', hex: '#B91C1C', border: 'border-red-200', glow: 'none' },
+  BSP: { bg: 'bg-blue-100', text: 'text-blue-700', hex: '#1D4ED8', border: 'border-blue-200', glow: 'none' },
+  INC: { bg: 'bg-emerald-100', text: 'text-emerald-700', hex: '#047857', border: 'border-emerald-200', glow: 'none' },
+  RLD: { bg: 'bg-amber-100', text: 'text-amber-700', hex: '#B45309', border: 'border-amber-200', glow: 'none' },
+  'AD(S)': { bg: 'bg-purple-100', text: 'text-purple-700', hex: '#7E22CE', border: 'border-purple-200', glow: 'none' },
+  NISHAD: { bg: 'bg-cyan-100', text: 'text-cyan-700', hex: '#0E7490', border: 'border-cyan-200', glow: 'none' },
+  SBSP: { bg: 'bg-yellow-100', text: 'text-yellow-700', hex: '#6D28D9', border: 'border-yellow-200', glow: 'none' },
+  'Jansatta Dal': { bg: 'bg-pink-100', text: 'text-pink-700', hex: '#BE185D', border: 'border-pink-200', glow: 'none' },
+  IND: { bg: 'bg-stone-100', text: 'text-stone-700', hex: '#465756', border: 'border-stone-200', glow: 'none' },
+  OTH: { bg: 'bg-neutral-100', text: 'text-neutral-700', hex: '#5A6B6B', border: 'border-neutral-200', glow: 'none' }
 };

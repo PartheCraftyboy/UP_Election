@@ -1,17 +1,22 @@
 import React, { useState, useMemo } from 'react';
-import { Navbar } from './components/Navbar';
+import { Navbar, TabKey } from './components/Navbar';
 import { ObsidianGraph } from './components/ObsidianGraph';
 import ConstituencyMap from './components/ConstituencyMap';
 import { ConstituencyDossier } from './components/ConstituencyDossier';
 import { StatewidePulse } from './components/StatewidePulse';
 import { LiveNewsFeed } from './components/LiveNewsFeed';
+import { DistrictBubbles } from './components/DistrictBubbles';
+import { MlaTracker } from './components/MlaTracker';
+import { LawTracker } from './components/LawTracker';
+import { Landing } from './components/Landing';
 import { ALL_CONSTITUENCIES } from './data/upConstituencies';
 import { INITIAL_NEWS_ARTICLES, generateObsidianGraphData } from './data/newsFeed';
 import { Constituency, NewsArticle } from './types';
 import { Radio, ChevronRight, Zap } from 'lucide-react';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'graph' | 'map' | 'pulse' | 'news'>('map');
+  const [view, setView] = useState<'landing' | 'app'>('landing');
+  const [activeTab, setActiveTab] = useState<TabKey>('bubbles');
   const [selectedConstituency, setSelectedConstituency] = useState<Constituency | null>(null);
   const [selectedNewsId, setSelectedNewsId] = useState<string | null>(null);
 
@@ -29,8 +34,18 @@ export function App() {
     setActiveTab('graph');
   };
 
+  const enterTerminal = (tab: TabKey) => {
+    setActiveTab(tab);
+    setView('app');
+    window.scrollTo({ top: 0 });
+  };
+
+  if (view === 'landing') {
+    return <Landing allConstituencies={constituencies} onEnter={enterTerminal} />;
+  }
+
   return (
-    <div className="min-h-screen bg-[#faf8f5] text-[#44403c] flex flex-col font-sans selection:bg-amber-100 selection:text-amber-900">
+    <div className="min-h-dvh bg-paper text-stone-800 flex flex-col font-sans">
       {/* Terminal Navbar */}
       <Navbar
         activeTab={activeTab}
@@ -67,6 +82,27 @@ export function App() {
           />
         )}
 
+        {activeTab === 'bubbles' && (
+          <DistrictBubbles
+            allConstituencies={constituencies}
+            onSelectConstituency={handleSelectConstituency}
+          />
+        )}
+
+        {activeTab === 'mla' && (
+          <MlaTracker
+            allConstituencies={constituencies}
+            onSelectConstituency={handleSelectConstituency}
+          />
+        )}
+
+        {activeTab === 'laws' && (
+          <LawTracker
+            allConstituencies={constituencies}
+            onSelectConstituency={handleSelectConstituency}
+          />
+        )}
+
         {activeTab === 'news' && (
           <LiveNewsFeed
             newsArticles={newsArticles}
@@ -78,18 +114,18 @@ export function App() {
       </main>
 
       {/* Bottom Ticker Tape */}
-      <div className="h-7 bg-[#f0ece4] border-t border-stone-200 px-4 flex items-center justify-between text-[11px] font-mono text-stone-600 select-none z-30">
+      <div className="h-8 bg-panel border-t border-rule px-6 flex items-center justify-between text-[11px] font-mono-term text-stone-600 select-none z-30">
         <div className="flex items-center gap-2 overflow-hidden">
-          <span className="flex items-center gap-1 text-amber-600 font-bold uppercase tracking-wider text-[10px]">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+          <span className="flex items-center gap-2 text-live-700 font-medium uppercase tracking-[0.12em] text-[10px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-live-600" />
             LIVE TICKER:
           </span>
           <div className="truncate text-stone-800">
-            {newsArticles[0]?.title} &bull; <span className="text-amber-700">{newsArticles[0]?.pollImpactSummary}</span>
+            {newsArticles[0]?.title} &bull; <span className="text-live-800">{newsArticles[0]?.pollImpactSummary}</span>
           </div>
         </div>
 
-        <div className="hidden md:flex items-center gap-4 text-stone-500 flex-shrink-0 text-[10px]">
+        <div className="hidden md:flex items-center gap-4 text-stone-500 flex-shrink-0 text-[10px] tnum">
           <span>UP POPULATION: ~24.1 CR</span>
           <span>&bull;</span>
           <span>403 ASSEMBLY SEGMENTS</span>

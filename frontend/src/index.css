@@ -1,40 +1,120 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap');
 @import "tailwindcss";
+
+/* UP27 light system. Every pairing below is WCAG checked against the paper
+   and panel grounds; see ../../.tastemaker/style-lock.md for the matrix. */
+@theme {
+  /* Cool neutral ramp. Overrides Tailwind's warm stone scale, so the
+     existing components re-theme without touching their class names. */
+  --color-stone-50: #F6FAFA;
+  --color-stone-100: #ECF2F2;
+  --color-stone-200: #DCE6E5;
+  --color-stone-300: #C3D2D1;
+  --color-stone-400: #748A89;
+  --color-stone-500: #5A6B6B;
+  --color-stone-600: #465756;
+  --color-stone-700: #354443;
+  --color-stone-800: #1F2E2D;
+  --color-stone-900: #0E1A1A;
+
+  /* Teal signal ramp, for live and interactive chrome only, never for data.
+     600 is fill-only (white label clears 4.95); 700 and up are text-safe
+     on both grounds. */
+  --color-live-50: #EAF6F6;
+  --color-live-100: #D2EBEB;
+  --color-live-200: #A8DADA;
+  --color-live-300: #6FC4C4;
+  --color-live-500: #0A9494;
+  --color-live-600: #077D7E;
+  --color-live-700: #066566;
+  --color-live-800: #054E4F;
+
+  --color-paper: #F6FAFA;
+  --color-panel: #ECF2F2;
+  --color-rule: #DCE6E5;
+  --color-ink: #0E1A1A;
+
+  /* Party ink. Data colour, never chrome. Always paired with the party
+     ticker in text so colour is not the only carrier. */
+  --color-bjp: #9A3412;
+  --color-sp: #B91C1C;
+  --color-bsp: #1D4ED8;
+  --color-inc: #047857;
+  --color-sbsp: #6D28D9;
+
+  --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-dv: 'Noto Sans Devanagari', 'Instrument Sans', sans-serif;
+}
 
 @layer base {
   :root {
-    --font-sans: 'IBM Plex Sans', sans-serif;
-    --font-mono: 'IBM Plex Mono', monospace;
-    --font-heading: 'Satoshi', sans-serif;
+    color-scheme: light;
   }
 
   body {
+    background-color: var(--color-paper);
+    color: var(--color-stone-800);
     font-family: var(--font-sans);
-    background-color: #faf8f5;
-    color: #44403c;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-live-600);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-live-100);
+    color: var(--color-live-800);
   }
 }
 
-/* Custom terminal & glassmorphic styling */
-.font-mono-term {
-  font-family: 'IBM Plex Mono', monospace;
-}
-
 .font-display {
-  font-family: 'Satoshi', sans-serif;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
-/* Custom scrollbars */
+.font-mono-term {
+  font-family: var(--font-mono);
+}
+
+/* Devanagari copy: headlines, law titles, MLA names */
+.font-dv {
+  font-family: var(--font-dv);
+  line-height: 1.6;
+}
+
+/* Every figure in the product is tabular so columns align */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: theme('colors.stone.200');
+  background: var(--color-stone-100);
 }
 ::-webkit-scrollbar-thumb {
-  background: theme('colors.stone.400');
+  background: var(--color-stone-300);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: theme('colors.stone.500');
+  background: var(--color-stone-400);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
