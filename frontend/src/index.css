@@ -6,12 +6,12 @@
 @theme {
   /* Cool neutral ramp. Overrides Tailwind's warm stone scale, so the
      existing components re-theme without touching their class names. */
-  --color-stone-50: #EAEFEE;
-  --color-stone-100: #E1E8E7;
-  --color-stone-200: #D0DAD9;
-  --color-stone-300: #B9C7C6;
-  --color-stone-400: #6E8483;
-  --color-stone-500: #5A6B6B;
+  --color-stone-50: #E1E7E5;
+  --color-stone-100: #D8DEDC;
+  --color-stone-200: #C7D1CF;
+  --color-stone-300: #B0BEBC;
+  --color-stone-400: #68807F;
+  --color-stone-500: #536363;
   --color-stone-600: #465756;
   --color-stone-700: #354443;
   --color-stone-800: #1F2E2D;
@@ -29,9 +29,9 @@
   --color-live-700: #066566;
   --color-live-800: #054E4F;
 
-  --color-paper: #E5EAE9;
-  --color-panel: #DCE1E0;
-  --color-rule: #CBD5D4;
+  --color-paper: #E1E7E5;
+  --color-panel: #D8DEDC;
+  --color-rule: #C7D1CF;
   --color-ink: #0E1A1A;
 
   /* Party colour, two tiers. `flag` is the party's own colour as Wikipedia's
