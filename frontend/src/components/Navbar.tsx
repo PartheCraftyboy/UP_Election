@@ -7,6 +7,8 @@ interface NavbarProps {
   activeTab: TabKey;
   setActiveTab: (tab: TabKey) => void;
   liveArticlesCount: number;
+  /** Back to the landing page, from any screen. */
+  onHome: () => void;
 }
 
 const TABS: { key: TabKey; label: string; short: string; Icon: typeof MapPin }[] = [
@@ -22,12 +24,20 @@ const TABS: { key: TabKey; label: string; short: string; Icon: typeof MapPin }[]
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
-  liveArticlesCount
+  liveArticlesCount,
+  onHome
 }) => (
   <header className="sticky top-0 z-40 bg-paper/95 backdrop-blur-sm border-b border-rule">
     <div className="flex items-center gap-8 flex-wrap px-6 min-h-16 py-2">
       <div className="flex items-baseline gap-3 shrink-0">
-        <span className="font-display text-base tracking-[0.1em] text-stone-900">UP27</span>
+        <button
+          type="button"
+          onClick={onHome}
+          aria-label="UP27, back to the landing page"
+          className="font-display text-base tracking-[0.1em] text-stone-900 hover:text-live-700"
+        >
+          UP27
+        </button>
         <span className="hidden md:inline font-mono-term text-[10px] uppercase tracking-[0.16em] text-stone-500">
           Vidhan Sabha Intelligence
         </span>

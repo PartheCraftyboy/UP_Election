@@ -10,6 +10,7 @@ import {
   MlaRow
 } from '../data/mlas2026';
 import { TabKey } from './Navbar';
+import { EmploymentChart } from './EmploymentChart';
 
 interface LandingProps {
   allConstituencies: Constituency[];
@@ -221,6 +222,32 @@ const DAMPING = 0.08;
  * On scroll the painting fades out and the thread unwinds into the chamber.
  */
 const HAND_IMAGE = '/scene.png';
+
+/**
+ * The voter behind the scene: a woman at a polling station showing her inked
+ * finger, standing behind the ballot box in the opening section. She is set
+ * low in opacity so she reads as the room the vote happens in, not a second
+ * subject competing with the hand.
+ *
+ * ALL FOUR NUMBERS BELOW ARE FRACTIONS OF THE CANVAS, not of the painting:
+ *   cx 0 is the left edge of the window, 1 the right edge
+ *   cy 0 is the top, 1 the bottom
+ * so cx 0.46 / cy 0.54 puts her centre just left of middle and a little low.
+ */
+const VOTER_IMAGE = '/voter.png';
+const VOTER_RATIO = 2752 / 1536;
+/** Her height, as a fraction of the canvas height. 1 touches top and bottom. */
+const VOTER_HEIGHT = 1;
+/** Where her centre sits. */
+const VOTER_CX = 0.324;
+const VOTER_CY = 0.5;
+/** How far back she sits. Higher is more present. */
+const VOTER_ALPHA = 0.5;
+/**
+ * The wide painting already reads left to right into the box, so it is not
+ * mirrored: flipping would send the queue the wrong way.
+ */
+const VOTER_FLIP = true;
 
 /**
  * The assembly building, behind the chamber. It fades in with the arc and out
@@ -488,6 +515,29 @@ const KALAWA = {
   wraps: 14
 };
 
+/**
+ * The trillion dollar goal, shown on the opening section.
+ *
+ * Every figure here is sourced and every one is contested, so the page says
+ * so rather than running a countdown to a single confident date:
+ *
+ *  - GSDP 2024-25 is the latest actual, from the state's first Economic
+ *    Survey. The 2025-26 and 2026-27 figures circulating are estimates and
+ *    projections, not outturns.
+ *  - One trillion dollars is about Rs 83 lakh crore, as the survey itself
+ *    converts it.
+ *  - The target YEAR has moved: the 2020 plan said 2025, the Chief Minister
+ *    has said 2027, and the 2026-27 budget coverage says 2029. That movement
+ *    is the honest story, and it is shown.
+ */
+const TRILLION = {
+  nowCrore: 30.25,
+  nowYear: '2024-25',
+  targetCrore: 83,
+  targetYear: 2029,
+  movedFrom: '2025, then 2027'
+};
+
 const SECTIONS: {
   marker: string;
   lead: string;
@@ -623,6 +673,57 @@ const imageRect = (
   };
 };
 
+/**
+ * A member's portrait, or their initials where no free one exists. The
+ * fallback is drawn rather than fetched, so a missing photo costs nothing and
+ * still carries the party's colour.
+ */
+const MlaFace: React.FC<{ ac: number; name: string; colour: string }> = ({
+  ac,
+  name,
+  colour
+}) => {
+  const [failed, setFailed] = useState(false);
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase();
+
+  const frame: React.CSSProperties = {
+    width: 50,
+    height: 50,
+    borderRadius: 10,
+    flexShrink: 0,
+    border: `1.5px solid ${colour}`
+  };
+
+  if (failed) {
+    return (
+      <div
+        aria-hidden="true"
+        className="grid place-items-center font-mono-term text-sm font-semibold"
+        style={{ ...frame, background: `${colour}22`, color: colour }}
+      >
+        {initials}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={`/mla/${String(ac).padStart(3, '0')}.png`}
+      alt=""
+      width={50}
+      height={50}
+      style={{ ...frame, objectFit: 'cover' }}
+      onError={() => setFailed(true)}
+    />
+  );
+};
+
 export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -653,6 +754,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
   const [pickSeq, setPickSeq] = useState(0);
   const heroImage = useRef<HTMLImageElement | null>(null);
   const parliamentImage = useRef<HTMLImageElement | null>(null);
+  const voterImage = useRef<HTMLImageElement | null>(null);
   const placeImages = useRef<(HTMLImageElement | null)[]>(PLACES.map(() => null));
   const heroReady = useRef(false);
   const ratioRef = useRef(HAND_IMAGE_RATIO);
@@ -915,6 +1017,22 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
 
     // The painting, fading out as the chamber takes over.
     const handPresence = idx === 0 ? 1 - t : 0;
+
+    // The voter stands behind it, in the same breath of the scroll.
+    const voter = voterImage.current;
+    if (handPresence > 0.01 && voter && voter.naturalWidth > 0) {
+      const vh = h * VOTER_HEIGHT;
+      const vw = vh * VOTER_RATIO;
+      ctx.save();
+      ctx.globalAlpha = handPresence * VOTER_ALPHA;
+      // Mirrored on the canvas, not in the file, so the asset stays as painted
+      // and the flip is one constant to undo.
+      ctx.translate(w * VOTER_CX, h * VOTER_CY);
+      if (VOTER_FLIP) ctx.scale(-1, 1);
+      ctx.drawImage(voter, -vw / 2, -vh / 2, vw, vh);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
     const img = heroImage.current;
     if (handPresence > 0.01 && img && heroReady.current) {
       const { scale } = anchorRef.current;
@@ -1134,6 +1252,15 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     ctx.globalAlpha = 1;
   }, []);
 
+  /** The voter behind the opening scene. A missing file is not an error. */
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      voterImage.current = img;
+    };
+    img.src = VOTER_IMAGE;
+  }, []);
+
   /** The four places. A missing file is not an error. */
   useEffect(() => {
     PLACES.forEach((place, i) => {
@@ -1243,7 +1370,10 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
 
       const thumb = thumbRef.current;
       if (thumb) {
-        const travel = 100 - SCROLL_HINT_THUMB;
+        // A percentage translate resolves against the ELEMENT's own height,
+        // not its parent's. The thumb has to cross (100 - thumb)% of the
+        // track, which in its own units is that over its own height.
+        const travel = ((100 - SCROLL_HINT_THUMB) / SCROLL_HINT_THUMB) * 100;
         thumb.style.transform = `translateY(${currentRef.current * travel}%)`;
       }
 
@@ -1339,7 +1469,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         transition: 'background-color 700ms ease, color 700ms ease'
       }}
     >
-      <div ref={scrollRef} style={{ height: `${STATES * 100}dvh` }} className="relative">
+      <div ref={scrollRef} style={{ height: `${STATES * 90}dvh` }} className="relative">
         <div
           className="sticky top-0 h-dvh overflow-hidden"
           onClick={pickStrand}
@@ -1372,7 +1502,17 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
           <div className="relative h-full flex flex-col px-6 md:px-10 py-6 md:py-8">
             <div className="flex items-start justify-between gap-8">
               <div className="flex flex-col gap-3">
-                <div className="flex items-stretch gap-4">
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.scrollTo({
+                      top: 0,
+                      behavior: reduceMotion.current ? 'auto' : 'smooth'
+                    })
+                  }
+                  aria-label="UP27, back to the top"
+                  className="flex items-stretch gap-4 text-left"
+                >
                   {/* The mark: six turns of thread in the kalawa's colours,
                       the same motif the hero winds round the wrist. */}
                   <svg
@@ -1419,7 +1559,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                       </span>
                     </div>
                   </div>
-                </div>
+                </button>
                 <img
                   src={MAP_IMAGE}
                   alt="District map of Uttar Pradesh"
@@ -1474,6 +1614,45 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                   <p className="mt-6 max-w-sm text-sm leading-relaxed opacity-75">
                     {section.body}
                   </p>
+                  {active === 1 && (
+                    <div className="mt-8">
+                      <EmploymentChart />
+                    </div>
+                  )}
+
+                  {active === 0 && (
+                    <div className="mt-8 max-w-sm">
+                      <div className="flex items-baseline justify-between gap-3 mb-2">
+                        <span className="font-mono-term text-[10px] uppercase tracking-[0.16em] opacity-60">
+                          Trillion dollar target
+                        </span>
+                        <span className="font-mono-term tnum text-[11px] opacity-75">
+                          {Math.round(
+                            (TRILLION.nowCrore / TRILLION.targetCrore) * 100
+                          )}
+                          %
+                        </span>
+                      </div>
+                      <div
+                        className="h-[5px] w-full rounded-full overflow-hidden"
+                        style={{ background: 'currentColor', opacity: 0.16 }}
+                      />
+                      <div
+                        className="h-[5px] rounded-full -mt-[5px]"
+                        style={{
+                          width: `${(TRILLION.nowCrore / TRILLION.targetCrore) * 100}%`,
+                          background: accent
+                        }}
+                      />
+                      <p className="mt-3 text-[13px] leading-relaxed opacity-70">
+                        Rs {TRILLION.nowCrore} lakh crore in {TRILLION.nowYear},
+                        against the Rs {TRILLION.targetCrore} lakh crore a
+                        trillion dollars takes. The target year has moved from{' '}
+                        {TRILLION.movedFrom} to {TRILLION.targetYear}.
+                      </p>
+                    </div>
+                  )}
+
                   {active === STATES - 1 && (
                     <button
                       type="button"
@@ -1561,7 +1740,13 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                   {vacant ? (
                     <div className="text-base leading-snug opacity-60">Vacant</div>
                   ) : (
-                    <>
+                    <div className="flex items-start gap-3">
+                      <MlaFace
+                        ac={picked.acNumber}
+                        name={row?.name ?? picked.currentMla}
+                        colour={edge}
+                      />
+                      <div className="min-w-0">
                       <div className="text-lg font-medium leading-snug">
                         {row?.name ?? picked.currentMla}
                       </div>
@@ -1578,7 +1763,8 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                           {row.office}
                         </div>
                       )}
-                    </>
+                      </div>
+                    </div>
                   )}
 
                   <dl className="mt-4 space-y-2">

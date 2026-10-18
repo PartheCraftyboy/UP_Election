@@ -34,6 +34,12 @@ export function App() {
     setActiveTab('graph');
   };
 
+  const goHome = () => {
+    setView('landing');
+    setSelectedConstituency(null);
+    window.scrollTo({ top: 0 });
+  };
+
   const enterTerminal = (tab: TabKey) => {
     setActiveTab(tab);
     setView('app');
@@ -50,6 +56,7 @@ export function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        onHome={goHome}
         liveArticlesCount={newsArticles.length}
       />
 
