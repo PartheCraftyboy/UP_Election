@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Constituency, PoliticalParty } from '../types';
 import { PARTY_COLORS } from '../data/upConstituencies';
-import { MLA_NAMES_HINDI } from '../data/mlaRegistry';
+
+import {
+  MLAS_2026,
+  mlaByAc,
+  isVacant,
+  HINDI_BY_NAME,
+  MlaRow
+} from '../data/mlas2026';
 import { TabKey } from './Navbar';
 
 interface LandingProps {
@@ -54,6 +61,27 @@ const STAGES: { bg: [number, number, number]; ink: [number, number, number] }[] 
 ];
 
 /** Party colour on a dark ground, where the daylight inks go muddy. */
+/**
+ * Every party that actually appears in the house, including the three the
+ * old table never carried: Jansatta Dal Loktantrik, Apna Dal (Kamerawadi),
+ * and the five vacant seats, which are drawn as absent rather than guessed.
+ */
+const PARTY_DAY: Record<string, string> = {
+  BJP: '#FF9933',
+  SP: '#FF2222',
+  BSP: '#22409A',
+  INC: '#00BFFF',
+  RLD: '#006400',
+  'AD(S)': '#26176D',
+  'AD(K)': '#7A4FBF',
+  NISHAD: '#0E7490',
+  SBSP: '#F5D50A',
+  'JD(L)': '#BE185D',
+  IND: '#8A9B9A',
+  Vacant: '#9AA6A4',
+  OTH: '#8A9B9A'
+};
+
 const PARTY_ON_DARK: Record<string, string> = {
   BJP: '#FFA23A',
   SP: '#E8536B',
@@ -64,9 +92,16 @@ const PARTY_ON_DARK: Record<string, string> = {
   NISHAD: '#49C3E3',
   SBSP: '#F5D50A',
   'Jansatta Dal': '#F277A6',
+  'JD(L)': '#F277A6',
+  'AD(K)': '#B18CFF',
+  Vacant: '#6E7A79',
   IND: '#AFC0BE',
   OTH: '#AFC0BE'
 };
+
+const dayColour = (party: string): string => PARTY_DAY[party] ?? PARTY_DAY.OTH;
+const nightColour = (party: string): string =>
+  PARTY_ON_DARK[party] ?? PARTY_ON_DARK.OTH;
 
 /** Steps in each strand's daylight to night colour ramp. */
 const TONE_STEPS = 16;
@@ -252,10 +287,69 @@ const MOON = {
   stars: 60
 };
 
-/** How long a picked member's card stays up, in ms. */
+/**
+ * What makes a seat loom larger in the ring. Population and economy are both
+ * per seat; office is the only one that belongs to the member rather than the
+ * place. The weights sum to 1, so the score lands in 0 to 1 and the ring's
+ * longest strand is roughly twice its shortest.
+ */
+const WEIGHT = {
+  population: 0.45,
+  economy: 0.35,
+  office: 0.2,
+  /** How far the length can swing, as a multiple of the base length. */
+  swing: 1.1
+};
+
+/**
+ * Office outranks arithmetic. A seat's population and economy set its length,
+ * but whoever holds one of these stands above that floor however small their
+ * district is, so the Chief Minister, the Deputy and the Speaker are always
+ * the three longest strands in the ring.
+ */
+const OFFICE_FLOOR: Record<number, number> = {
+  1: 1, // Chief Minister
+  2: 0.95, // Deputy Chief Minister, Speaker
+  3: 0.82, // Cabinet Minister, Leader of the Opposition
+  4: 0.7, // Minister of State, independent charge
+  5: 0.62 // Minister of State
+};
+
+/** The scroll hint's thumb height, as a percent of its track. */
+const SCROLL_HINT_THUMB = 22;
+
+/** How long the tray stays out before it slides back, in ms. */
 const CARD_DWELL = 5000;
-/** How near a double click has to land, in px, to count as hitting a strand. */
-const CARD_REACH = 26;
+/** Slide in: a touch of overshoot, so it arrives rather than appears. */
+const TRAY_IN = 420;
+/** Slide out: quicker than it came, the way dismissals should be. */
+const TRAY_OUT = 260;
+/** How near the pointer has to be to a strand's line, in px, to catch it. */
+const CARD_REACH = 14;
+
+/**
+ * Distance from a point to a line SEGMENT, not to its start. A strand is a
+ * line a couple of pixels wide, so testing against its endpoint missed every
+ * click that landed along it, and in the packed arc the nearest endpoint
+ * often belonged to a different strand than the one under the cursor.
+ */
+const distToSegment = (
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+): number => {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = x1 + t * dx - px;
+  const cy = y1 + t * dy - py;
+  return Math.hypot(cx, cy);
+};
 
 /**
  * The dataset names eleven real members; the other 392 rows are generated
@@ -263,6 +357,23 @@ const CARD_REACH = 26;
  * counts. The card says so rather than presenting them as people.
  */
 const isGeneratedRow = (c: Constituency): boolean => /^MLA\s/.test(c.currentMla);
+
+/** 'rgb(r,g,b)' to 'rgba(r,g,b,a)', for the tray's frosted fill. */
+const withAlpha = (css: string, a: number): string =>
+  css.replace('rgb(', 'rgba(').replace(')', `,${a})`);
+
+const inIndia = new Intl.NumberFormat('en-IN');
+const asDate = new Intl.DateTimeFormat('en-IN', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric'
+});
+
+const joinedLabel = (row: MlaRow): string => {
+  if (!row.joined) return '--';
+  const d = new Date(row.joined);
+  return Number.isNaN(d.getTime()) ? '--' : asDate.format(d);
+};
 
 const compactElectors = (n: number): string =>
   n >= 10000000 ? `${(n / 10000000).toFixed(2)} cr` : `${(n / 100000).toFixed(1)} lakh`;
@@ -432,7 +543,7 @@ const KEY_PARTIES: PoliticalParty[] = ['BJP', 'SP', 'BSP', 'RLD'];
  * opposition at the far end, so the hemicycle reads as party blocks the way
  * a real chamber does rather than scattering colour by seat number.
  */
-const SEATING_ORDER: PoliticalParty[] = [
+const SEATING_ORDER: string[] = [
   'BJP',
   'AD(S)',
   'NISHAD',
@@ -441,6 +552,9 @@ const SEATING_ORDER: PoliticalParty[] = [
   'IND',
   'OTH',
   'Jansatta Dal',
+  'JD(L)',
+  'AD(K)',
+  'Vacant',
   'BSP',
   'INC',
   'SP'
@@ -518,13 +632,25 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
   const activeRef = useRef(0);
   const sizeRef = useRef({ w: 0, h: 0 });
   const scaleRef = useRef(0);
-  /** Every strand's drawn position this frame, for hit testing. */
+  /** Every strand's drawn segment this frame: x1, y1, x2, y2 per strand. */
   const hitsRef = useRef<Float32Array>(new Float32Array(0));
+  /** Pointer position over the stage, and the strand under it. */
+  const pointerRef = useRef<{ x: number; y: number; on: boolean }>({
+    x: 0,
+    y: 0,
+    on: false
+  });
+  const hoverRef = useRef(-1);
+  /** The scroll hint's thumb, moved directly so the loop never re-renders. */
+  const thumbRef = useRef<HTMLDivElement | null>(null);
   const anchorRef = useRef({ cx: 0, cy: 0, scale: 0 });
   const strandsRef = useRef<Strand[]>([]);
 
   const [active, setActive] = useState(0);
   const [picked, setPicked] = useState<Constituency | null>(null);
+  const [trayOut, setTrayOut] = useState(false);
+  /** Bumped on every pick so the countdown line restarts, even on a repeat. */
+  const [pickSeq, setPickSeq] = useState(0);
   const heroImage = useRef<HTMLImageElement | null>(null);
   const parliamentImage = useRef<HTMLImageElement | null>(null);
   const placeImages = useRef<(HTMLImageElement | null)[]>(PLACES.map(() => null));
@@ -537,16 +663,42 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
 
-  /** One strand per sitting member. */
-  const members = useMemo(
-    () =>
-      allConstituencies.map((c) => ({
-        party: c.mlaParty as PoliticalParty,
+  /**
+   * One strand per seat, coloured by the party that actually holds it. The
+   * roll call is the CSV, not the sample dataset, so the house you see is the
+   * house as it stands.
+   */
+  const members = useMemo(() => {
+    const pops = MLAS_2026.map((r) => r.popPerSeat);
+    const econ = MLAS_2026.map((r) => r.economyPerSeatEst);
+    const span = (xs: number[]) => {
+      const lo = Math.min(...xs);
+      const hi = Math.max(...xs);
+      return (v: number) => (hi === lo ? 0.5 : (v - lo) / (hi - lo));
+    };
+    const normPop = span(pops);
+    const normEcon = span(econ);
+
+    return allConstituencies.map((c, i) => {
+      const row = mlaByAc(c.acNumber) ?? MLAS_2026[i];
+      const rank = row?.officeRank ?? 0;
+      const officeScore = rank ? OFFICE_FLOOR[rank] : 0;
+      const earned = row
+        ? WEIGHT.population * normPop(row.popPerSeat) +
+          WEIGHT.economy * normEcon(row.economyPerSeatEst) +
+          WEIGHT.office * officeScore
+        : 0.4;
+      // The floor wins where it is higher, so office is never outweighed by
+      // the size of the district a member happens to represent.
+      const weight = rank ? Math.max(earned, OFFICE_FLOOR[rank]) : earned;
+      return {
+        party: (row?.party ?? c.mlaParty) as string,
         region: c.region,
-        voters: c.demographics.totalVoters
-      })),
-    [allConstituencies]
-  );
+        voters: c.demographics.totalVoters,
+        weight
+      };
+    });
+  }, [allConstituencies]);
 
   const buildStrands = useCallback(
     (w: number, h: number): Strand[] => {
@@ -559,7 +711,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       // Position in the chamber, by party block. Used by the arc and the ring
       // so both read as party affiliation; the bundle and the clusters keep
       // their own logic.
-      const rank = (party: PoliticalParty) => {
+      const rank = (party: string) => {
         const r = SEATING_ORDER.indexOf(party);
         return r === -1 ? SEATING_ORDER.length : r;
       };
@@ -678,11 +830,14 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         // right, mirroring the chamber arc below it.
         const ringA = -Math.PI / 2 + su * Math.PI * 2;
         const ringR = scale * (0.2 + j1 * 0.012);
+        // In the ring, length is weight: how much of the state a seat
+        // carries, from its population, its economy and its office.
+        const heft = 1 - WEIGHT.swing / 2 + member.weight * WEIGHT.swing;
         const ring: [number, number, number, number] = [
           cx + Math.cos(ringA) * ringR,
           cy + Math.sin(ringA) * ringR,
           ringA,
-          len * (0.75 + j2 * 0.9)
+          len * heft * (0.9 + j2 * 0.25)
         ];
 
         // D. the lotus, drawn as petal outlines with a seed pod at the core.
@@ -727,11 +882,8 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
           f: [kalawa, arc, ring, lotus],
           // The party's own colour. A strand is thin, but 403 of them make a
           // field, which is what carries saffron on a light ground.
-          colour: PARTY_COLORS[member.party]?.flag ?? '#8A9B9A',
-          tone: buildTone(
-            PARTY_COLORS[member.party]?.flag ?? '#8A9B9A',
-            PARTY_ON_DARK[member.party] ?? '#AFC0BE'
-          ),
+          colour: dayColour(member.party),
+          tone: buildTone(dayColour(member.party), nightColour(member.party)),
           alpha: 0.62 + j2 * 0.33,
           cordAlpha,
           phase: rnd(i, 3) * Math.PI * 2
@@ -910,10 +1062,36 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       ctx.globalAlpha = 1;
     }
 
-    if (hitsRef.current.length !== strands.length * 2) {
-      hitsRef.current = new Float32Array(strands.length * 2);
+    if (hitsRef.current.length !== strands.length * 4) {
+      hitsRef.current = new Float32Array(strands.length * 4);
     }
     const hits = hitsRef.current;
+
+    // Which strand the pointer is on, from last frame's segments. One frame
+    // stale, which is invisible, and it lets the loop below light it up.
+    let hover = -1;
+    if (pointerRef.current.on && hits.length) {
+      const { x: mx, y: my } = pointerRef.current;
+      let bestD = CARD_REACH;
+      for (let i = 0; i < strands.length; i++) {
+        const d = distToSegment(
+          mx,
+          my,
+          hits[i * 4],
+          hits[i * 4 + 1],
+          hits[i * 4 + 2],
+          hits[i * 4 + 3]
+        );
+        if (d < bestD) {
+          bestD = d;
+          hover = i;
+        }
+      }
+    }
+    if (hover !== hoverRef.current) {
+      hoverRef.current = hover;
+      canvas.style.cursor = hover >= 0 ? 'pointer' : 'default';
+    }
 
     ctx.lineCap = 'round';
     ctx.lineWidth = 1.4;
@@ -929,16 +1107,27 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       const ang = lerp(a[2], b[2], t) + wobble * 0.035;
       const len = lerp(a[3], b[3], t) * (1 + wobble * 0.045);
 
-      if (hits.length > i * 2 + 1) {
-        hits[i * 2] = x;
-        hits[i * 2 + 1] = y;
+      const ex = x + Math.cos(ang) * len;
+      const ey = y + Math.sin(ang) * len;
+
+      if (hits.length > i * 4 + 3) {
+        hits[i * 4] = x;
+        hits[i * 4 + 1] = y;
+        hits[i * 4 + 2] = ex;
+        hits[i * 4 + 3] = ey;
       }
 
-      ctx.strokeStyle = s.tone[toneStep];
-      ctx.globalAlpha = idx === 0 ? lerp(s.cordAlpha, s.alpha, t) : s.alpha;
+      const lit = i === hover;
+      ctx.strokeStyle = lit ? stage.ink : s.tone[toneStep];
+      ctx.globalAlpha = lit
+        ? 1
+        : idx === 0
+        ? lerp(s.cordAlpha, s.alpha, t)
+        : s.alpha;
+      ctx.lineWidth = lit ? 3.4 : 1.4;
       ctx.beginPath();
       ctx.moveTo(x, y);
-      ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+      ctx.lineTo(ex, ey);
       ctx.stroke();
     }
 
@@ -1052,6 +1241,12 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
 
       draw(ts);
 
+      const thumb = thumbRef.current;
+      if (thumb) {
+        const travel = 100 - SCROLL_HINT_THUMB;
+        thumb.style.transform = `translateY(${currentRef.current * travel}%)`;
+      }
+
       const next = Math.min(
         STATES - 1,
         Math.round(currentRef.current * (STATES - 1))
@@ -1077,13 +1272,22 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     };
   }, [draw]);
 
+  /** Out on pick, back in after the dwell. */
   useEffect(() => {
     if (!picked) return;
-    const id = window.setTimeout(() => setPicked(null), CARD_DWELL);
+    setTrayOut(true);
+    const id = window.setTimeout(() => setTrayOut(false), CARD_DWELL);
     return () => window.clearTimeout(id);
   }, [picked]);
 
-  /** Double click anywhere: find the nearest strand and name its member. */
+  /** Only unmount once it has finished sliding back, or the exit is lost. */
+  useEffect(() => {
+    if (trayOut || !picked) return;
+    const id = window.setTimeout(() => setPicked(null), TRAY_OUT + 40);
+    return () => window.clearTimeout(id);
+  }, [trayOut, picked]);
+
+  /** Click a strand to name its member. The hover highlight is the target. */
   const pickStrand = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('a')) return;
@@ -1095,18 +1299,30 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const hits = hitsRef.current;
-    let best = -1;
-    let bestD = CARD_REACH * CARD_REACH;
-    for (let i = 0; i < allConstituencies.length; i++) {
-      const dx = hits[i * 2] - mx;
-      const dy = hits[i * 2 + 1] - my;
-      const d = dx * dx + dy * dy;
-      if (d < bestD) {
-        bestD = d;
-        best = i;
+    let best = hoverRef.current;
+    if (best < 0) {
+      let bestD = CARD_REACH;
+      for (let i = 0; i < allConstituencies.length; i++) {
+        const d = distToSegment(
+          mx,
+          my,
+          hits[i * 4],
+          hits[i * 4 + 1],
+          hits[i * 4 + 2],
+          hits[i * 4 + 3]
+        );
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
       }
     }
-    if (best >= 0) setPicked(allConstituencies[best]);
+    if (best >= 0) {
+      setPicked(allConstituencies[best]);
+      setPickSeq((n) => n + 1);
+    } else {
+      setTrayOut(false);
+    }
   };
 
   const section = SECTIONS[active];
@@ -1126,12 +1342,25 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       <div ref={scrollRef} style={{ height: `${STATES * 100}dvh` }} className="relative">
         <div
           className="sticky top-0 h-dvh overflow-hidden"
-          onDoubleClick={pickStrand}
+          onClick={pickStrand}
           // A second mousedown is what starts the browser's word selection.
           // Cancelling only that leaves ordinary click-and-drag selection
           // working everywhere else.
           onMouseDown={(e) => {
             if (e.detail > 1) e.preventDefault();
+          }}
+          onMouseMove={(e) => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const rect = canvas.getBoundingClientRect();
+            pointerRef.current = {
+              x: e.clientX - rect.left,
+              y: e.clientY - rect.top,
+              on: true
+            };
+          }}
+          onMouseLeave={() => {
+            pointerRef.current.on = false;
           }}
         >
           <canvas
@@ -1265,90 +1494,177 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
               </div>
             </div>
 
-            {picked && (
-              <aside
-                role="status"
-                aria-live="polite"
-                className="absolute right-6 md:right-10 bottom-24 w-72 p-5 rounded-md"
+            <div
+              aria-hidden="true"
+              className="absolute right-3 top-1/2 -translate-y-1/2 h-40 w-[3px] rounded-full overflow-hidden hidden sm:block"
+              style={{
+                background: withAlpha(domStage.ink, 0.1),
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)'
+              }}
+            >
+              <div
+                ref={thumbRef}
+                className="w-full rounded-full"
                 style={{
-                  background: domStage.bg,
-                  color: domStage.ink,
-                  border: `1px solid ${PARTY_COLORS[picked.mlaParty]?.flag ?? accent}`,
-                  boxShadow: '0 10px 40px rgba(0,0,0,0.18)'
+                  height: `${SCROLL_HINT_THUMB}%`,
+                  background: withAlpha(domStage.ink, 0.45),
+                  willChange: 'transform'
                 }}
-              >
-                <div className="flex items-baseline justify-between gap-3 mb-3">
-                  <span className="font-mono-term text-[10px] uppercase tracking-[0.18em] opacity-60">
-                    Member
-                  </span>
-                  <span
-                    className="font-mono-term text-[11px] font-semibold"
-                    style={{ color: PARTY_COLORS[picked.mlaParty]?.flag }}
-                  >
-                    {picked.mlaParty}
-                  </span>
-                </div>
+              />
+            </div>
 
-                {isGeneratedRow(picked) ? (
-                  <div className="text-base leading-snug opacity-55">
-                    Not named in the sample data
+            {picked && (() => {
+              const row = mlaByAc(picked.acNumber);
+              const party = row?.party ?? picked.mlaParty;
+              const edge = dayColour(party);
+              const vacant = row ? isVacant(row) : false;
+              return (
+                <aside
+                  role="status"
+                  aria-live="polite"
+                  className="absolute right-0 bottom-24 w-80 pl-6 pr-7 py-5 rounded-l-xl overflow-hidden"
+                  style={{
+                    background: withAlpha(domStage.bg, 0.52),
+                    backdropFilter: 'blur(24px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+                    color: domStage.ink,
+                    borderTop: `1px solid ${withAlpha(domStage.ink, 0.14)}`,
+                    borderBottom: `1px solid ${withAlpha(domStage.ink, 0.14)}`,
+                    borderLeft: `3px solid ${edge}`,
+                    boxShadow: `-18px 0 60px rgba(0,0,0,0.3), inset 0 1px 0 ${withAlpha(
+                      domStage.ink,
+                      0.12
+                    )}`,
+                    transform: trayOut ? 'translateX(0)' : 'translateX(105%)',
+                    opacity: trayOut ? 1 : 0,
+                    transition: trayOut
+                      ? `transform ${TRAY_IN}ms cubic-bezier(0.22, 1.08, 0.36, 1), opacity ${Math.round(
+                          TRAY_IN * 0.45
+                        )}ms ease-out`
+                      : `transform ${TRAY_OUT}ms cubic-bezier(0.4, 0, 0.9, 1), opacity ${TRAY_OUT}ms ease-in`,
+                    willChange: 'transform'
+                  }}
+                >
+                  <div className="flex items-baseline justify-between gap-3 mb-3">
+                    <span className="font-mono-term text-[10px] uppercase tracking-[0.18em] opacity-60">
+                      {vacant ? 'Seat' : 'Member'}
+                    </span>
+                    <span
+                      className="font-mono-term text-[11px] font-semibold"
+                      style={{ color: edge }}
+                    >
+                      {party}
+                    </span>
                   </div>
-                ) : (
-                  <>
-                    <div className="text-lg font-medium leading-snug">
-                      {picked.currentMla}
-                    </div>
-                    {MLA_NAMES_HINDI[picked.acNumber] && (
-                      <div className="font-dv text-sm opacity-70">
-                        {MLA_NAMES_HINDI[picked.acNumber]}
+
+                  {vacant ? (
+                    <div className="text-base leading-snug opacity-60">Vacant</div>
+                  ) : (
+                    <>
+                      <div className="text-lg font-medium leading-snug">
+                        {row?.name ?? picked.currentMla}
                       </div>
-                    )}
-                  </>
-                )}
+                      {row && HINDI_BY_NAME[row.name] && (
+                        <div className="font-dv text-sm opacity-70">
+                          {HINDI_BY_NAME[row.name]}
+                        </div>
+                      )}
+                      {row?.office && (
+                        <div
+                          className="mt-1 font-mono-term text-[11px] uppercase tracking-[0.12em]"
+                          style={{ color: edge }}
+                        >
+                          {row.office}
+                        </div>
+                      )}
+                    </>
+                  )}
 
-                <dl className="mt-4 space-y-2">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
-                      Constituency
-                    </dt>
-                    <dd className="text-sm text-right">
-                      {picked.name}
-                      <span className="font-mono-term tnum opacity-60"> / {picked.acNumber}</span>
-                    </dd>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
-                      District
-                    </dt>
-                    <dd className="text-sm">{picked.district}</dd>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
-                      Electors
-                    </dt>
-                    <dd className="font-mono-term tnum text-sm">
-                      {isGeneratedRow(picked)
-                        ? '--'
-                        : compactElectors(picked.demographics.totalVoters)}
-                    </dd>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
-                      Elected
-                    </dt>
-                    <dd className="font-mono-term tnum text-sm">
-                      {isGeneratedRow(picked) ? '--' : '2022'}
-                    </dd>
-                  </div>
-                </dl>
+                  <dl className="mt-4 space-y-2">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
+                        Constituency
+                      </dt>
+                      <dd className="text-sm text-right">
+                        {row?.seat ?? picked.name}
+                        <span className="font-mono-term tnum opacity-60">
+                          {' '}
+                          / {picked.acNumber}
+                        </span>
+                      </dd>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
+                        District
+                      </dt>
+                      <dd className="text-sm">{row?.district ?? picked.district}</dd>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
+                        District pop.
+                      </dt>
+                      <dd className="font-mono-term tnum text-sm">
+                        {row ? inIndia.format(row.districtPop) : '--'}
+                      </dd>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
+                        Joined
+                      </dt>
+                      <dd className="font-mono-term text-sm">
+                        {row ? joinedLabel(row) : '--'}
+                      </dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="font-mono-term text-[10px] uppercase tracking-[0.14em] opacity-55">
+                        Rating
+                      </dt>
+                      <dd className="flex items-center gap-2">
+                        <span className="flex gap-[3px]" aria-hidden="true">
+                          {[0, 1, 2, 3, 4].map((i) => (
+                            <span
+                              key={i}
+                              className="h-[6px] w-[6px] rounded-full"
+                              style={{
+                                background: edge,
+                                opacity:
+                                  row && i < Math.round(row.ratingEst / 2) ? 0.95 : 0.2
+                              }}
+                            />
+                          ))}
+                        </span>
+                        <span className="font-mono-term tnum text-sm">
+                          {row ? (row.ratingEst / 2).toFixed(1) : '--'}
+                        </span>
+                      </dd>
+                    </div>
+                  </dl>
 
-                <p className="mt-3 font-mono-term text-[10px] uppercase tracking-[0.12em] opacity-45">
-                  {isGeneratedRow(picked)
-                    ? 'Generated row, not a real member'
-                    : '18th Vidhan Sabha'}
-                </p>
-              </aside>
-            )}
+                  <p className="mt-3 font-mono-term text-[10px] uppercase tracking-[0.12em] opacity-45">
+                    {row?.alliance && row.alliance !== '-'
+                      ? `${row.alliance} / rating est.`
+                      : '18th Vidhan Sabha'}
+                  </p>
+
+                  <div
+                    aria-hidden="true"
+                    className="absolute left-0 bottom-0 h-[3px] w-full overflow-hidden"
+                  >
+                    <div
+                      key={pickSeq}
+                      className="h-full w-full origin-left"
+                      style={{
+                        background: edge,
+                        animation: trayOut
+                          ? `tray-timer ${CARD_DWELL}ms linear forwards`
+                          : 'none'
+                      }}
+                    />
+                  </div>
+                </aside>
+              );
+            })()}
 
             <div className="flex items-end justify-between gap-8 flex-wrap">
               <div className="flex flex-col gap-3">

@@ -125,3 +125,22 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* The tray's countdown: a line that runs out as the dwell does. */
+@keyframes tray-timer {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* The page's own scrollbar only. Scroll bars inside panels are left alone,
+   since there they tell you there is more to read. */
+html {
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar {
+  display: none;
+}
