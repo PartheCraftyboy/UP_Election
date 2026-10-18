@@ -14,3 +14,8 @@ venv/
 .env
 .env.*
 !.env.example
+
+# Raw artwork and reference footage. The processed assets that the app
+# actually loads live in frontend/public; these are the originals they were
+# made from, and they are large.
+/source/

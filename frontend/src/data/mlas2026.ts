@@ -1,6 +1,6 @@
 /**
  * The 18th Vidhan Sabha as it stands, generated from
- * `uttar_pradesh_mlas_2026.csv` in the repo root. One row per seat, AC 1 to
+ * `data/uttar_pradesh_mlas_2026.csv`. One row per seat, AC 1 to
  * 403, in order.
  *
  * `office` and `officeRank` are read from the source's Notes column, which
