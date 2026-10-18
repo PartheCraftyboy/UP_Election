@@ -49,7 +49,7 @@ const CHAMBER_DROP = 0;
 const STAGES: { bg: [number, number, number]; ink: [number, number, number] }[] = [
   { bg: [225, 231, 229], ink: [14, 26, 26] }, //   daylight     #E1E7E5
   { bg: [191, 208, 208], ink: [14, 26, 26] }, //   overcast     #BFD0D0
-  { bg: [53, 32, 86], ink: [230, 225, 236] }, //   deep night   #352056
+  { bg: [51, 76, 123], ink: [230, 232, 240] }, //  royal blue   #334C7B
   { bg: [31, 8, 0], ink: [239, 226, 206] } //      mud          #1F0800
 ];
 
@@ -786,6 +786,12 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         ctx.globalAlpha = ring * 0.96;
         ctx.translate(w * place.cx, h * place.cy - glide);
         ctx.rotate(place.tilt);
+        // The ground is now lighter than the paintings, so they need lifting
+        // off it. The shadow follows each feathered edge, which reads softer
+        // than a drawn border would.
+        ctx.shadowColor = 'rgba(6,14,34,0.55)';
+        ctx.shadowBlur = scaleRef.current * 0.035;
+        ctx.shadowOffsetY = scaleRef.current * 0.012;
         ctx.drawImage(img, -pw / 2, -ph / 2, pw, ph);
         ctx.restore();
       });
