@@ -133,6 +133,23 @@ Leave `MAP_TITLE_INSET` alone unless the artwork changes. It is measured: the
 map's own "UTTAR PRADESH" title starts 4.98% in from the left edge of the
 image, and this cancels that so the title lines up with the mark above it.
 
+## The district layer
+
+`DISTRICT_HOVER` is the highlight over the painted map: `fill` under the
+pointer, `fillPicked` once the tray is showing that district, and `stroke` in
+artwork units so it holds at either map scale.
+
+The stroke is painted in the fill's own colour on purpose. A district is kept
+as its constituencies' rings rather than a true union, so a contrasting
+stroke would draw every seat boundary inside it and the highlight would read
+as a mesh. Matching it instead closes the hairline gaps simplification leaves
+between neighbouring seats.
+
+The outlines themselves are generated, not tuned here; see
+[DATA.md](DATA.md#the-district-outlines) for the fit and how to rebuild them.
+The layer only takes the pointer on section A and never on a phone, where the
+map is 132px across and a district is about ten pixels.
+
 ## Where to start
 
 `STATES * 100dvh` for pacing, and `WEIGHT.swing` for how much the ring varies.

@@ -9,6 +9,7 @@ import {
   HINDI_BY_NAME,
   MlaRow
 } from '../data/mlas2026';
+import { DISTRICT_SHAPES, DistrictShape } from '../data/upDistrictShapes';
 import { TabKey } from './Navbar';
 import { EmploymentChart } from './EmploymentChart';
 
@@ -105,7 +106,7 @@ const nightColour = (party: string): string =>
   PARTY_ON_DARK[party] ?? PARTY_ON_DARK.OTH;
 
 /** Steps in each strand's daylight to night colour ramp. */
-const TONE_STEPS = 16;
+const TONE_STEPS = 128;
 
 const toRgb = (hex: string): [number, number, number] => {
   const h = hex.replace('#', '');
@@ -179,12 +180,23 @@ const mixRgb = (
   t: number
 ): string => mixPerceptual(a, b, t).css;
 
-/** Built once per party pair, not per frame. */
+/**
+ * Built once per party pair, not per frame, and SHARED by every member of
+ * that party: the ramp depends only on the two colours, so 403 strands need
+ * eleven ramps between them, not 403. That is what makes a fine ramp cheap
+ * enough to use — at sixteen steps the whole house changed colour in visible
+ * jumps as the page darkened.
+ */
+const toneCache = new Map<string, string[]>();
 const buildTone = (light: string, dark: string): string[] => {
+  const key = `${light}|${dark}`;
+  const hit = toneCache.get(key);
+  if (hit) return hit;
   const a = toRgb(light);
   const b = toRgb(dark);
   const out: string[] = [];
   for (let i = 0; i <= TONE_STEPS; i++) out.push(mixRgb(a, b, i / TONE_STEPS));
+  toneCache.set(key, out);
   return out;
 };
 
@@ -270,6 +282,95 @@ const PARLIAMENT_BOTTOM = -0.05;
  * cx, cy and width are fractions of the canvas; tilt is radians; drift is how
  * strongly it moves against the scroll.
  */
+/**
+ * Portrait is a different stage, not a narrower one. On a phone there is no
+ * "beside": the painting and the words cannot sit side by side, so the screen
+ * is cut in two instead. Everything drawn — the formations, the painting, the
+ * places, the house — is confined to a band across the top, and the words own
+ * the bottom. The two never share a pixel, which is the only way type stays
+ * readable over artwork this busy.
+ *
+ * All of it is a fraction of the canvas, so it holds from a small phone to a
+ * large one without a second set of numbers.
+ */
+const PORTRAIT_BELOW = 0.85;
+const isPortrait = (w: number, h: number): boolean => w / h < PORTRAIT_BELOW;
+
+/**
+ * The artwork band, in canvas pixels. In portrait it is MEASURED from the
+ * header's bottom and the copy's top rather than taken as a fraction: a
+ * fraction that clears the headline on a 844pt phone buries it on a 640pt
+ * one, and no amount of tuning makes a fixed number true for both. Measuring
+ * makes "the artwork never touches the type" a property of the layout rather
+ * than of the constants. Null means landscape, or not measured yet.
+ */
+type Band = { top: number; bottom: number } | null;
+
+/** The band to draw into, falling back to the fractions before first measure. */
+const bandOf = (w: number, h: number, band: Band) => {
+  if (!isPortrait(w, h)) return null;
+  if (band && band.bottom - band.top > h * 0.16) return band;
+  return {
+    top: PORTRAIT.bandTop * h,
+    bottom: (PORTRAIT.bandTop + PORTRAIT.bandHeight) * h
+  };
+};
+
+const PORTRAIT = {
+  /** Top of the artwork band, under the header. */
+  bandTop: 0.115,
+  /**
+   * Its height. Below this the words begin, and the words are bottom-aligned
+   * in portrait rather than centred, so the gap between the two is slack
+   * rather than a collision waiting for a longer headline.
+   */
+  bandHeight: 0.36,
+  /** Formations, as a fraction of the SHORT edge, same as landscape. */
+  stage: 0.92,
+  /** The hero painting's height, as a fraction of the band. */
+  scene: 1.02,
+  /** How far its right edge sits inside the canvas. */
+  sceneInset: 0.02,
+  /** The voter behind it: smaller, and fainter, so type below stays clean. */
+  voter: 0.6,
+  voterAlpha: 0.22,
+  /** The house, as a fraction of canvas width. */
+  parliament: 0.96,
+  /** The four places, pulled in around the band's own centre. */
+  placeScale: 0.62,
+  /** Clearance kept between the band and the header and copy, in px. */
+  gap: 10
+};
+
+/**
+ * The portrait layout's own numbers, for the parts that are DOM rather than
+ * canvas. The map is the one that matters: at its desk size it fills the
+ * artwork band and shoulders the nav clean off a 390px screen, so on a phone
+ * it shrinks to a locator and leaves after the opening section.
+ */
+const PORTRAIT_UI = {
+  /** Map width in px. Small enough to sit beside the painting, not under it. */
+  map: 132,
+  /** Wordmark size in px, down from BRAND_SIZE. */
+  brand: 36,
+  /** Pulls the caption up under it, as BRAND_CAPTION_SHIFT does on desktop. */
+  brandCaption: -10
+};
+
+/** Where the formations are centred, and how big they are drawn. */
+const stageOf = (w: number, h: number, band: Band) => {
+  const short = Math.min(w, h);
+  const b = bandOf(w, h, band);
+  if (!b) return { cx: w / 2, cy: h / 2, scale: short };
+  const height = b.bottom - b.top;
+  return {
+    cx: w / 2,
+    cy: (b.top + b.bottom) / 2,
+    // Never taller than the band it has to live inside.
+    scale: Math.min(short * PORTRAIT.stage, height * 1.5)
+  };
+};
+
 const PLACES: {
   src: string;
   cx: number;
@@ -283,6 +384,27 @@ const PLACES: {
   { src: '/places/kumbh.png', cx: 0.85, cy: 0.69, width: 0.44, tilt: -0.04, drift: 0.8 },
   { src: '/places/varanasi.png', cx: 0.33, cy: 0.83, width: 0.32, tilt: 0.06, drift: 1.25 }
 ];
+
+/**
+ * Where a place painting sits. In portrait its `cy` is read against the band
+ * rather than the whole screen, and it is drawn smaller, so the four of them
+ * crowd the top of the phone instead of landing across the headline.
+ */
+const placeAt = (
+  place: (typeof PLACES)[number],
+  w: number,
+  h: number,
+  band: Band
+) => {
+  const b = bandOf(w, h, band);
+  return b
+    ? {
+        x: w * place.cx,
+        y: b.top + place.cy * (b.bottom - b.top),
+        width: w * place.width * PORTRAIT.placeScale
+      }
+    : { x: w * place.cx, y: h * place.cy, width: w * place.width };
+};
 
 /**
  * What makes the night live. All of it is a function of the clock, so it
@@ -299,6 +421,52 @@ const LIVE = {
 };
 
 /**
+ * The day's own weather, over the vote and the chamber. The night sections
+ * already have snow falling; these lift instead, so the two read as one
+ * system seen at two hours rather than the same trick run twice.
+ *
+ * On a pale ground a glow does nothing, so these are not glowing embers but
+ * warm ash caught against the light: a shade darker than the paper, soft
+ * edged, breathing on the same flame function as the diyas in section C.
+ */
+const AMBER = {
+  /** How many drift across the whole scene. */
+  motes: 70,
+  /**
+   * The two warms, dealt one in three. Both clear 2.7:1 on the daylight
+   * ground and 2.1:1 on the overcast one, so they survive the page darkening
+   * into the chamber. Both deliberately fall short of the BJP's #FF9933: a
+   * saffron drift over the opening two sections would read as a party wash
+   * on a product that takes no side.
+   */
+  warm: '#B05E12',
+  pale: '#C8761F',
+  /**
+   * Pixels a second upward, and to the right. The two together are the wind:
+   * the field crosses from the bottom left to the top right rather than
+   * rising straight. Both are scaled by the SAME per-mote speed, so every
+   * mote travels at one angle and the field reads as one draught instead of
+   * a scatter going its own ways. atan(drift / rise) is that angle off the
+   * vertical, about 41 degrees as set.
+   */
+  rise: 16,
+  drift: 14,
+  /** How far one wanders off its line, in pixels. */
+  sway: 26,
+  /** Largest radius before the soft edge, in pixels. */
+  size: 3.2,
+  /**
+   * Faintest and extra opacity, dealt per mote. Set higher than the night's
+   * snow on purpose: the snow gets its presence from a dark backdrop, and
+   * the same values over daylight disappear.
+   */
+  floor: 0.2,
+  range: 0.45,
+  /** How much the flame function breathes them, 0 for a steady mote. */
+  breath: 0.45
+};
+
+/**
  * The moon over the mud. Placed off the lotus's axis so the bloom keeps the
  * centre, with a soft halo rather than a hard disc: a painted moon, not a
  * drawn one. Positions are fractions of the canvas.
@@ -312,6 +480,41 @@ const MOON = {
   halo: 1.7,
   /** Stars over the mud. Fewer and warmer than the night sky's. */
   stars: 60
+};
+
+/**
+ * Embers off the mud, under the moon. Each of the other three sections now
+ * carries its own weather, and this is the last one's.
+ *
+ * What makes it read as depth rather than as a scatter of dots is that one
+ * number drives all of it. Every ember gets a `z`, far at 0 and near at 1,
+ * and z sets its size, its speed, its brightness, how wide it wanders and how
+ * soft its edge. Near ones are big, bright, quick and slightly out of focus;
+ * far ones are small, dim, slow and tight. They are dealt in z order, so the
+ * near ones pass in front of the far without anything being sorted.
+ */
+const EMBERS = {
+  /** How many rise over the mud. */
+  count: 160,
+  /** Radius at the front and at the back, in pixels. */
+  near: 4.2,
+  far: 0.6,
+  /** Pixels a second upward, at the back and at the front. */
+  slow: 9,
+  fast: 42,
+  /** How far one wanders off its line at the front, in pixels. */
+  sway: 34,
+  /**
+   * How far the field slides against the scroll at the front, as a fraction
+   * of canvas height. The back barely moves. This is the parallax, and the
+   * reason the depth answers the scroll instead of sitting behind it.
+   */
+  parallax: 0.18,
+  /** Dimmest, and how much the near end adds, before the stage fade. */
+  floor: 0.18,
+  range: 0.62,
+  /** How hard they gutter on the shared flame function. */
+  breath: 0.55
 };
 
 /**
@@ -343,6 +546,22 @@ const OFFICE_FLOOR: Record<number, number> = {
 };
 
 /** The scroll hint's thumb height, as a percent of its track. */
+/**
+ * How much scrolling each of the four states is given, in dvh. The progress
+ * the page reads is a fraction of this track's own height, so this is the one
+ * lever on pacing: raise it and every state holds longer, lower it and the
+ * journey quickens. It does not move anything on screen by itself.
+ */
+const SCROLL_PER_STATE = 140;
+
+/**
+ * How far past a section's midpoint the scroll must travel before the DOM
+ * hands over to the next one, in sections. It only stops the handover
+ * chattering at the boundary; the canvas itself is continuous and never
+ * reads this.
+ */
+const ACTIVE_HYSTERESIS = 0.08;
+
 const SCROLL_HINT_THUMB = 22;
 
 /** How long the tray stays out before it slides back, in ms. */
@@ -417,10 +636,10 @@ const flameAt = (ts: number, seed: number): number => {
 };
 
 /** Fallback until the file loads and reports its own. */
-const HAND_IMAGE_RATIO = 1792 / 2400;
+const HAND_IMAGE_RATIO = 1600 / 2686;
 
 /** Painting width as a fraction of the smaller canvas edge. */
-const HAND_SCENE = 0.72;
+const HAND_SCENE = 0.738;
 
 /**
  * The painting is anchored to the right of the viewport and pushed slightly
@@ -448,6 +667,50 @@ const MAP_WIDTH = 400;
  * change to MAP_WIDTH.
  */
 const MAP_TITLE_INSET = 0.0498;
+
+/**
+ * The district layer over the painted map. The shapes are traced from the
+ * Election Commission's constituency polygons and registered to the artwork,
+ * so a hover lands on the real district rather than on a guessed box; see
+ * `../data/upDistrictShapes.ts` for how the fit was measured.
+ */
+const DISTRICT_HOVER = {
+  /** Fill under the pointer, over the painting's own colour. */
+  fill: 0.3,
+  /** And once that district is the one the tray is showing. */
+  fillPicked: 0.42,
+  /**
+   * Edge weight, in artwork units, so it holds at either map scale. It is
+   * painted in the fill's own colour rather than a darker one: a district is
+   * kept as its constituencies' rings, not a true union, so a contrasting
+   * stroke would draw every seat boundary inside it and the highlight would
+   * read as a mesh. Matching it instead closes the hairline gaps that
+   * simplification leaves between neighbouring seats, and the district comes
+   * up as one shape.
+   */
+  stroke: 7
+};
+
+/** One SVG path for a whole district: every constituency ring, one subpath. */
+const districtPath = (shape: DistrictShape, size: number): string =>
+  shape.rings
+    .map((ring) => {
+      let d = '';
+      for (let i = 0; i < ring.length; i += 2) {
+        d += `${i === 0 ? 'M' : 'L'}${(ring[i] * size).toFixed(1)},${(
+          ring[i + 1] * size
+        ).toFixed(1)}`;
+      }
+      return `${d}Z`;
+    })
+    .join('');
+/**
+ * And its ceiling as a fraction of viewport height, for short laptops. The
+ * map is in the flow of the header column, so its height is spent out of the
+ * copy's budget below it.
+ */
+const MAP_MAX_VH = 0.3;
+
 /** What it shrinks to once the page scrolls past section A. */
 const MAP_SCROLLED_SCALE = 0.5;
 /**
@@ -460,10 +723,10 @@ const MAP_CORNER: [number, number] = [-10, -10];
 const HAND_BLEED = 0.002;
 /**
  * Vertical placement, as a fraction of the viewport height. 0 pins the top of
- * the painting to the top of the window, so the hand stays whole and the tall
- * box runs off the bottom. Negative lifts it further.
+ * the painting to the top of the window, so the hand stays whole and only the
+ * table's front leg runs off the bottom. Negative lifts it further.
  */
-const HAND_OFFSET_Y = 0.04;
+const HAND_OFFSET_Y = 0;
 
 /**
  * Where the thread crosses the wrist, as fractions of the PAINTING, not the
@@ -486,33 +749,39 @@ const HAND_BAND_B: [number, number] = [0.755, 0.32];
  */
 const KALAWA = {
   /** Middle of the band, on the bare wrist. */
-  centre: [0.688, 0.145] as [number, number],
+  centre: [0.688, 0.113] as [number, number],
   /** Direction along the forearm, radians. */
   armAngle: -0.38,
   /** How far the band runs along the arm, as a fraction of painting width. */
   bandLength: 0.03,
   /** Half the arm's thickness here, as a fraction of painting height. */
-  armRadius: 0.065,
+  armRadius: 0.050,
   /** How much each turn bows along the arm. More reads as rounder. */
-  tilt: 0.35,
+  tilt: 0.39,
   /**
    * Longitudinal twist: how far a turn slides along the arm as it crosses
    * from one silhouette edge to the other, as a fraction of the arm's half
    * thickness. This is what makes it a helix rather than a stack of parallel
    * rings. 0 is a flat ribbon; negative twists the other way.
    */
-  twist: 0.3,
+  twist: 0.34,
   /**
    * How far each arc stops short of the silhouette, as a fraction of the half
    * turn. The arm is not a perfect cylinder, so arcs drawn all the way to the
    * ellipse's ends overshoot the real edge and appear to float off it. Raise
    * this to tuck the ends further inside the arm.
    */
-  edgeInset: 0.15,
+  edgeInset: 0.2,
   /** Alpha at the tucked ends, where the thread curves out of sight. */
-  endFade: 0.3,
+  endFade: 1,
   /** Visible turns of thread. */
-  wraps: 14
+  wraps: 14,
+  /**
+   * How far the braid's plies advance per turn, as a fraction of one turn.
+   * 0 stacks them straight up the arm, so the red sits in one block; this
+   * winds them round it, so the red crosses the saffron on every turn.
+   */
+  braidPitch: 0.1
 };
 
 /**
@@ -661,8 +930,22 @@ const imageRect = (
   canvasW: number,
   canvasH: number,
   scale: number,
-  ratio: number
+  ratio: number,
+  band: Band
 ) => {
+  const portraitBand = bandOf(canvasW, canvasH, band);
+  if (portraitBand) {
+    // Sized off the band, not the short edge: in portrait the painting has a
+    // height to fit into, and its width follows from that.
+    const h = (portraitBand.bottom - portraitBand.top) * PORTRAIT.scene;
+    const w = h * ratio;
+    return {
+      x: canvasW * (1 - PORTRAIT.sceneInset) - w,
+      y: portraitBand.top,
+      w,
+      h
+    };
+  }
   const w = scale * HAND_SCENE;
   const h = w / ratio;
   return {
@@ -745,10 +1028,64 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
   /** The scroll hint's thumb, moved directly so the loop never re-renders. */
   const thumbRef = useRef<HTMLDivElement | null>(null);
   const anchorRef = useRef({ cx: 0, cy: 0, scale: 0 });
+  /** The measured artwork band. See the Band type for why it is measured. */
+  const bandRef = useRef<Band>(null);
+  /** The viewport the band was measured for; a change starts it over. */
+  const bandSizeRef = useRef<{ w: number; h: number } | null>(null);
+  const stageElRef = useRef<HTMLDivElement>(null);
+  /**
+   * The band is capped by the wordmark and the nav, NOT by the header
+   * element: the header's subtree also holds the locator map, which belongs
+   * inside the band beside the painting rather than above it.
+   */
+  const brandElRef = useRef<HTMLButtonElement>(null);
+  const navElRef = useRef<HTMLElement>(null);
+  const copyElRef = useRef<HTMLDivElement>(null);
   const strandsRef = useRef<Strand[]>([]);
+
+  /**
+   * Dev only: `?state=2` pins the page to that section so each layout can be
+   * captured at every stop without scripting a scroll. The window is left
+   * where it is — scrolling the document would carry the sticky stage off
+   * screen. `import.meta.env.DEV` is a build-time constant, so this is gone
+   * from a production bundle.
+   */
+  const pinned = useRef<number | null>(
+    import.meta.env.DEV
+      ? (() => {
+          // `get` returns null when the parameter is absent, and Number(null)
+          // is 0, which is a valid state — so without this check every dev
+          // load pins itself to the opening section and the scroll goes dead.
+          const raw = new URLSearchParams(window.location.search).get('state');
+          if (raw === null || raw.trim() === '') return null;
+          const v = Number(raw);
+          return Number.isFinite(v) && v >= 0 && v <= STATES - 1
+            ? v / (STATES - 1)
+            : null;
+        })()
+      : null
+  );
+
+  /** Portrait for the DOM's purposes, kept in state since layout reads it. */
+  const [portraitUI, setPortraitUI] = useState(() =>
+    typeof window === 'undefined'
+      ? false
+      : isPortrait(window.innerWidth, window.innerHeight)
+  );
+  /** Viewport height, which the map is sized against on short screens. */
+  const [viewH, setViewH] = useState(() =>
+    typeof window === 'undefined' ? 900 : window.innerHeight
+  );
 
   const [active, setActive] = useState(0);
   const [picked, setPicked] = useState<Constituency | null>(null);
+  /**
+   * The district the tray is showing, from the map. It outlives `picked`: you
+   * open a district, step into one of its seats and come back out, so the two
+   * are separate rather than one selection with a mode flag.
+   */
+  const [district, setDistrict] = useState<DistrictShape | null>(null);
+  const [hoverDistrict, setHoverDistrict] = useState<string | null>(null);
   const [trayOut, setTrayOut] = useState(false);
   /** Bumped on every pick so the countdown line restarts, even on a repeat. */
   const [pickSeq, setPickSeq] = useState(0);
@@ -804,9 +1141,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
 
   const buildStrands = useCallback(
     (w: number, h: number): Strand[] => {
-      const cx = w / 2;
-      const cy = h / 2;
-      const scale = Math.min(w, h);
+      const { cx, cy, scale } = stageOf(w, h, bandRef.current);
       const maxVoters = Math.max(...members.map((m) => m.voters));
       const rows = 9;
 
@@ -837,6 +1172,34 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         seatRank[memberIndex] = position;
       });
 
+      /**
+       * The kalawa's own order, and the only formation that departs from the
+       * chamber's. Seating runs one party straight after another, so a thread
+       * laid in that order is a solid saffron stretch followed by a solid red
+       * one. A real kalawa is plied, not blocked: red and orange wind around
+       * each other. So the thread deals the same members onto its turns by a
+       * helical key, which carries a red ply through the saffron that advances
+       * a little with every turn. Nobody changes colour and nobody is dropped;
+       * only the order along the thread changes, and the arc, the ring and the
+       * bloom all keep the seating.
+       */
+      const braidRank = new Array<number>(members.length);
+      {
+        const turn = members.length / KALAWA.wraps;
+        const slots = members.map((_, position) => {
+          const wrap = Math.min(KALAWA.wraps - 1, Math.floor(position / turn));
+          const within = position / turn - wrap;
+          // Offsetting each turn by a constant is what makes the plies climb
+          // the arm around one another instead of stacking in line.
+          const phi = (((within - wrap * KALAWA.braidPitch) % 1) + 1) % 1;
+          return { position, phi };
+        });
+        slots.sort((a, b) => a.phi - b.phi || a.position - b.position);
+        slots.forEach((slot, k) => {
+          braidRank[seated[k]] = slot.position;
+        });
+      }
+
       const petalEdge = (
         layer: (typeof LOTUS_LAYERS)[number],
         axis: number,
@@ -863,9 +1226,11 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         const len = (0.018 + 0.03 * Math.sqrt(member.voters / maxVoters)) * scale;
 
         // A. the kalawa, wound round the wrist. Each member is one piece of
-        // one turn, in its own party colour.
-        const rect = imageRect(w, h, scale, ratioRef.current);
+        // one turn, in its own party colour, dealt in braid order so the red
+        // and the saffron ply through one another.
+        const rect = imageRect(w, h, scale, ratioRef.current, bandRef.current);
         const rank = seatRank[i];
+        const braid = braidRank[i];
         const armX = Math.cos(KALAWA.armAngle);
         const armY = Math.sin(KALAWA.armAngle);
         const acrossX = -armY;
@@ -875,8 +1240,8 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         const lean = KALAWA.tilt * armHalf;
         const perWrap = members.length / KALAWA.wraps;
 
-        const wrapIndex = Math.min(KALAWA.wraps - 1, Math.floor(rank / perWrap));
-        const within = (rank - wrapIndex * perWrap) / perWrap;
+        const wrapIndex = Math.min(KALAWA.wraps - 1, Math.floor(braid / perWrap));
+        const within = (braid - wrapIndex * perWrap) / perWrap;
         // Half a turn only: the other half is behind the arm, and both ends
         // stop short of the silhouette so they do not overshoot the edge.
         const span = Math.PI * (1 - 2 * KALAWA.edgeInset);
@@ -1021,13 +1386,20 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     // The voter stands behind it, in the same breath of the scroll.
     const voter = voterImage.current;
     if (handPresence > 0.01 && voter && voter.naturalWidth > 0) {
-      const vh = h * VOTER_HEIGHT;
+      const portrait = isPortrait(w, h);
+      const vh = h * (portrait ? PORTRAIT.bandHeight * PORTRAIT.voter * 2.2 : VOTER_HEIGHT);
       const vw = vh * VOTER_RATIO;
       ctx.save();
-      ctx.globalAlpha = handPresence * VOTER_ALPHA;
+      ctx.globalAlpha =
+        handPresence * (portrait ? PORTRAIT.voterAlpha : VOTER_ALPHA);
       // Mirrored on the canvas, not in the file, so the asset stays as painted
       // and the flip is one constant to undo.
-      ctx.translate(w * VOTER_CX, h * VOTER_CY);
+      ctx.translate(
+        w * VOTER_CX,
+        portrait
+          ? (PORTRAIT.bandTop + PORTRAIT.bandHeight / 2) * h
+          : h * VOTER_CY
+      );
       if (VOTER_FLIP) ctx.scale(-1, 1);
       ctx.drawImage(voter, -vw / 2, -vh / 2, vw, vh);
       ctx.restore();
@@ -1036,9 +1408,57 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     const img = heroImage.current;
     if (handPresence > 0.01 && img && heroReady.current) {
       const { scale } = anchorRef.current;
-      const rect = imageRect(w, h, scale, ratioRef.current);
+      const rect = imageRect(w, h, scale, ratioRef.current, bandRef.current);
       ctx.globalAlpha = handPresence;
       ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h);
+      ctx.globalAlpha = 1;
+    }
+
+    // Day's weather: warm motes lifting through the vote and the chamber.
+    // Full over both, then out across the run into the ring, which is the
+    // same span the snow fades in over. The two cross in the middle of that
+    // leg on purpose: the air warms down as it cools over, rather than one
+    // weather being swapped for the other at a line.
+    const warm = Math.max(0, Math.min(1, 2 - p));
+    if (warm > 0.01 && !reduceMotion.current) {
+      for (let i = 0; i < AMBER.motes; i++) {
+        // One speed per mote, spent on both axes, so the whole field leans
+        // the same way and only the pace varies.
+        const speed = 0.45 + rnd(i, 51) * 1.1;
+        const lift = AMBER.rise * speed;
+        const travel = AMBER.drift * speed;
+        const wander =
+          Math.sin(ts * 0.00042 + i * 2.1) * AMBER.sway * (0.3 + rnd(i, 52));
+        // Right and up, each wrapping on its own axis: a mote leaving the top
+        // re-enters below the bottom, one leaving the right re-enters at the
+        // left. Both spans overshoot the canvas to keep the re-entry off
+        // screen.
+        const across = w + 80;
+        const mx =
+          ((((rnd(i, 53) * across + (ts / 1000) * travel + wander) % across) +
+            across) %
+            across) - 40;
+        const span = h + 80;
+        const my =
+          ((((rnd(i, 54) * span - (ts / 1000) * lift) % span) + span) % span) - 40;
+        const r = 0.7 + rnd(i, 55) * AMBER.size;
+        // A soft edge. A flat disc this small reads as dirt on the screen; a
+        // gradient reads as something in the air.
+        const hex = i % 3 === 0 ? AMBER.pale : AMBER.warm;
+        const glow = ctx.createRadialGradient(mx, my, 0, mx, my, r * 2.2);
+        glow.addColorStop(0, hex);
+        // Holding most of the opacity to not quite half the radius keeps a
+        // core to the mote. A straight falloff from the centre is all haze
+        // and reads as a smudge rather than a speck in the air.
+        glow.addColorStop(0.45, `${hex}D9`);
+        glow.addColorStop(1, `${hex}00`);
+        const pulse = 1 - AMBER.breath + AMBER.breath * flameAt(ts, i * 1.9);
+        ctx.globalAlpha = warm * (AMBER.floor + rnd(i, 56) * AMBER.range) * pulse;
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(mx, my, r * 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.globalAlpha = 1;
     }
 
@@ -1049,12 +1469,13 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       PLACES.forEach((place, i) => {
         const img = placeImages.current[i];
         if (!img || img.naturalWidth === 0) return;
-        const pw = w * place.width;
+        const spot = placeAt(place, w, h, bandRef.current);
+        const pw = spot.width;
         const ph = (pw * img.naturalHeight) / img.naturalWidth;
         const glide = (p - 2) * place.drift * h * 0.07;
         ctx.save();
         ctx.globalAlpha = ring * 0.96;
-        ctx.translate(w * place.cx, h * place.cy - glide);
+        ctx.translate(spot.x, spot.y - glide);
         ctx.rotate(place.tilt);
         // The ground is now lighter than the paintings, so they need lifting
         // off it. The shadow follows each feathered edge, which reads softer
@@ -1077,12 +1498,13 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       PLACES.forEach((place, i) => {
         const img = placeImages.current[i];
         if (!img || img.naturalWidth === 0) return;
-        const pw = w * place.width;
+        const spot = placeAt(place, w, h, bandRef.current);
+        const pw = spot.width;
         const ph = (pw * img.naturalHeight) / img.naturalWidth;
         const glide = (p - 2) * place.drift * h * 0.07;
         ctx.save();
         ctx.globalAlpha = ring * LIVE.flicker * flameAt(ts, i * 3.3);
-        ctx.translate(w * place.cx, h * place.cy - glide);
+        ctx.translate(spot.x, spot.y - glide);
         ctx.rotate(place.tilt);
         ctx.drawImage(img, -pw / 2, -ph / 2, pw, ph);
         ctx.restore();
@@ -1165,6 +1587,49 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
           ctx.arc(sx, sy, 0.6 + rnd(i, 45) * 1.4, 0, Math.PI * 2);
           ctx.fill();
         }
+
+        // Embers off the mud. `lighter` is what makes them read as alight
+        // rather than as warm paint sitting on the dark.
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < EMBERS.count; i++) {
+          // Far at 0, near at 1, taken straight off the index so the loop
+          // draws back to front without a sort. Squared into the radius, so
+          // the near end pulls away from the field instead of the whole
+          // field growing evenly.
+          const z = (i + 0.5) / EMBERS.count;
+          const r = EMBERS.far + (EMBERS.near - EMBERS.far) * z * z;
+          const lift = EMBERS.slow + (EMBERS.fast - EMBERS.slow) * z;
+          const wander =
+            Math.sin(ts * 0.00055 + i * 1.7) * EMBERS.sway * z * (0.4 + rnd(i, 61));
+          const ex = (((rnd(i, 62) * w + wander) % w) + w) % w;
+          const span = h + 120;
+          // The scroll drags the near field further than the far one.
+          const shift = (p - 3) * EMBERS.parallax * z * h;
+          const ey =
+            ((((rnd(i, 63) * span - (ts / 1000) * lift + shift) % span) + span) %
+              span) -
+            60;
+          const hex =
+            i % 5 === 0 ? '#FFE3AE' : i % 2 === 0 ? '#FFB36B' : '#FF8A3C';
+          // Nearer than the focal plane, so the front of the field is the
+          // softer end. Distance sharpens as it dims.
+          const soft = 1.6 + 1.4 * z;
+          const glow = ctx.createRadialGradient(ex, ey, 0, ex, ey, r * soft);
+          glow.addColorStop(0, hex);
+          glow.addColorStop(0.4, `${hex}B3`);
+          glow.addColorStop(1, `${hex}00`);
+          const pulse = 1 - EMBERS.breath + EMBERS.breath * flameAt(ts, i * 2.7);
+          ctx.globalAlpha =
+            mud *
+            (EMBERS.floor + EMBERS.range * z) *
+            pulse *
+            (0.5 + rnd(i, 64) * 0.5);
+          ctx.fillStyle = glow;
+          ctx.beginPath();
+          ctx.arc(ex, ey, r * soft, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
       }
       ctx.globalAlpha = 1;
     }
@@ -1173,10 +1638,15 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     const chamber = Math.max(0, 1 - Math.abs(p - 1));
     const building = parliamentImage.current;
     if (chamber > 0.01 && building) {
-      const pw = w * PARLIAMENT_WIDTH;
+      const portraitHouse = isPortrait(w, h);
+      const pw = w * (portraitHouse ? PORTRAIT.parliament : PARLIAMENT_WIDTH);
       const ph = pw / PARLIAMENT_RATIO;
+      // In portrait it stands on the band's floor; in landscape, the page's.
+      const houseY = portraitHouse
+        ? (PORTRAIT.bandTop + PORTRAIT.bandHeight) * h - ph
+        : h - ph - PARLIAMENT_BOTTOM * h;
       ctx.globalAlpha = chamber;
-      ctx.drawImage(building, (w - pw) / 2, h - ph - PARLIAMENT_BOTTOM * h, pw, ph);
+      ctx.drawImage(building, (w - pw) / 2, houseY, pw, ph);
       ctx.globalAlpha = 1;
     }
 
@@ -1312,12 +1782,8 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       const ctx = canvas.getContext('2d');
       if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       sizeRef.current = { w: rect.width, h: rect.height };
-      scaleRef.current = Math.min(rect.width, rect.height);
-      anchorRef.current = {
-        cx: rect.width / 2,
-        cy: rect.height / 2,
-        scale: Math.min(rect.width, rect.height)
-      };
+      anchorRef.current = stageOf(rect.width, rect.height, bandRef.current);
+      scaleRef.current = anchorRef.current.scale;
       strandsRef.current = buildStrands(rect.width, rect.height);
       draw(performance.now());
     };
@@ -1346,6 +1812,11 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     };
 
     const onScroll = () => {
+      if (pinned.current !== null) {
+        targetRef.current = pinned.current;
+        currentRef.current = pinned.current;
+        return;
+      }
       const raw = measure();
       targetRef.current = reduceMotion.current
         ? Math.round(raw * (STATES - 1)) / (STATES - 1)
@@ -1377,10 +1848,20 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
         thumb.style.transform = `translateY(${currentRef.current * travel}%)`;
       }
 
-      const next = Math.min(
-        STATES - 1,
-        Math.round(currentRef.current * (STATES - 1))
-      );
+      // Which section the DOM is showing. Rounding alone flips this back and
+      // forth while the scroll sits on a boundary, and every flip is a React
+      // render plus a strand rebuild — which is exactly the stutter between
+      // the vote and the chamber. The handover needs to be passed by a margin
+      // before it counts, and it only ever moves one section at a time, which
+      // the damped follow cannot outrun.
+      const raw = currentRef.current * (STATES - 1);
+      const held = activeRef.current;
+      const next =
+        raw > held + 0.5 + ACTIVE_HYSTERESIS
+          ? Math.min(STATES - 1, held + 1)
+          : raw < held - 0.5 - ACTIVE_HYSTERESIS
+            ? Math.max(0, held - 1)
+            : held;
       if (next !== activeRef.current) {
         activeRef.current = next;
         setActive(next);
@@ -1402,20 +1883,143 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
     };
   }, [draw]);
 
-  /** Out on pick, back in after the dwell. */
+  /**
+   * Out on pick, back in after the dwell. A strand pick is a glance, so it
+   * times out; a district opened from the map is something you are reading
+   * down, so it stays until it is dismissed.
+   */
   useEffect(() => {
-    if (!picked) return;
+    if (!picked && !district) return;
     setTrayOut(true);
+    if (district) return;
     const id = window.setTimeout(() => setTrayOut(false), CARD_DWELL);
     return () => window.clearTimeout(id);
-  }, [picked]);
+  }, [picked, district]);
 
   /** Only unmount once it has finished sliding back, or the exit is lost. */
   useEffect(() => {
-    if (trayOut || !picked) return;
-    const id = window.setTimeout(() => setPicked(null), TRAY_OUT + 40);
+    if (trayOut || (!picked && !district)) return;
+    const id = window.setTimeout(() => {
+      setPicked(null);
+      setDistrict(null);
+    }, TRAY_OUT + 40);
     return () => window.clearTimeout(id);
-  }, [trayOut, picked]);
+  }, [trayOut, picked, district]);
+
+  /**
+   * The map is only live on the opening section, so its tray leaves with it.
+   * A strand pick is left alone: it times out on its own.
+   */
+  useEffect(() => {
+    if (active !== 0 && district) setTrayOut(false);
+  }, [active, district]);
+
+  /** Escape closes the tray, whichever of the two opened it. */
+  useEffect(() => {
+    if (!trayOut) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTrayOut(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [trayOut]);
+
+  useEffect(() => {
+    const onResize = () => {
+      setPortraitUI(isPortrait(window.innerWidth, window.innerHeight));
+      setViewH(window.innerHeight);
+    };
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  /**
+   * Measure the gap the artwork is allowed to use: from under the header to
+   * above the copy. Runs after every layout that could move either, so a
+   * longer headline or a shorter phone takes room FROM the artwork instead of
+   * being drawn over by it.
+   *
+   * Within one viewport the band only ever TIGHTENS. Each section's copy is a
+   * different height — the vote carries the trillion figure, the chamber does
+   * not — so measuring each one in turn would resize the artwork every time
+   * the page handed over, which is a jump exactly at the boundary. Keeping
+   * the tightest seen so far means the band is sized for the longest copy and
+   * then holds still for the whole scroll. A real resize starts it over.
+   */
+  useEffect(() => {
+    const measure = () => {
+      const stage = stageElRef.current;
+      const brand = brandElRef.current;
+      const nav = navElRef.current;
+      const copy = copyElRef.current;
+      if (!stage || !brand || !nav || !copy) return;
+      const s = stage.getBoundingClientRect();
+      const chrome = Math.max(
+        brand.getBoundingClientRect().bottom,
+        nav.getBoundingClientRect().bottom
+      );
+      const next: Band = isPortrait(s.width, s.height)
+        ? {
+            top: chrome - s.top + PORTRAIT.gap,
+            bottom: copy.getBoundingClientRect().top - s.top - PORTRAIT.gap
+          }
+        : null;
+      // A new viewport starts the measurement over; otherwise keep whichever
+      // of the two is the more constrained, on each edge.
+      const sized = bandSizeRef.current;
+      const resized =
+        !sized ||
+        Math.abs(sized.w - s.width) > 1 ||
+        Math.abs(sized.h - s.height) > 1;
+      bandSizeRef.current = { w: s.width, h: s.height };
+
+      const prev = resized ? null : bandRef.current;
+      const merged: Band =
+        prev && next
+          ? {
+              top: Math.max(prev.top, next.top),
+              bottom: Math.min(prev.bottom, next.bottom)
+            }
+          : next;
+
+      const held = bandRef.current;
+      const same =
+        (!held && !merged) ||
+        (held &&
+          merged &&
+          Math.abs(held.top - merged.top) < 1 &&
+          Math.abs(held.bottom - merged.bottom) < 1);
+      if (same) return;
+      bandRef.current = merged;
+      anchorRef.current = stageOf(s.width, s.height, merged);
+      scaleRef.current = anchorRef.current.scale;
+      strandsRef.current = buildStrands(s.width, s.height);
+      draw(performance.now());
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (stageElRef.current) ro.observe(stageElRef.current);
+    if (brandElRef.current) ro.observe(brandElRef.current);
+    if (navElRef.current) ro.observe(navElRef.current);
+    if (copyElRef.current) ro.observe(copyElRef.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [buildStrands, draw, portraitUI, active]);
+
+  /** Seats of the open district, in AC order, with their members attached. */
+  const districtSeats = useMemo(() => {
+    if (!district) return [];
+    return district.seats.map((ac) => ({
+      ac,
+      row: mlaByAc(ac),
+      seat: allConstituencies.find((c) => c.acNumber === ac) ?? null
+    }));
+  }, [district, allConstituencies]);
 
   /** Click a strand to name its member. The hover highlight is the target. */
   const pickStrand = (e: React.MouseEvent) => {
@@ -1448,6 +2052,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
       }
     }
     if (best >= 0) {
+      setDistrict(null);
       setPicked(allConstituencies[best]);
       setPickSeq((n) => n + 1);
     } else {
@@ -1460,17 +2065,74 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
   // between them. The canvas scrubs it continuously.
   const domStage = stageAt(active);
   const accent = active <= 1 ? '#066566' : '#63D8D2';
+  /**
+   * The map sits in the header's own column, so its height is header height,
+   * and on a 900pt laptop a 400px map leaves the copy below it less room than
+   * the copy needs — the trillion paragraph was running off the bottom. Tying
+   * it to the viewport gives that space back on short screens and changes
+   * nothing on tall ones.
+   */
+  const mapWidth = portraitUI
+    ? PORTRAIT_UI.map
+    : Math.round(Math.min(MAP_WIDTH, viewH * MAP_MAX_VH));
+
+  /**
+   * The tray's shell, shared by the two things that fill it: a member picked
+   * off a strand, and a district picked off the map. Same glass, same slide;
+   * only the left edge's colour and the contents differ.
+   */
+  const trayShell = (edge: string): React.CSSProperties => ({
+    background: withAlpha(domStage.bg, 0.52),
+    backdropFilter: 'blur(24px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+    color: domStage.ink,
+    borderTop: `1px solid ${withAlpha(domStage.ink, 0.14)}`,
+    borderBottom: `1px solid ${withAlpha(domStage.ink, 0.14)}`,
+    borderLeft: portraitUI ? 'none' : `3px solid ${edge}`,
+    borderTopWidth: portraitUI ? 3 : undefined,
+    borderTopColor: portraitUI ? edge : undefined,
+    boxShadow: portraitUI
+      ? '0 -18px 60px rgba(0,0,0,0.3)'
+      : `-18px 0 60px rgba(0,0,0,0.3), inset 0 1px 0 ${withAlpha(
+          domStage.ink,
+          0.12
+        )}`,
+    // A side tray on a phone would hang over the legend and the counter.
+    // Portrait gets the native shape instead: a sheet up from the bottom.
+    transform: trayOut
+      ? 'translate(0, 0)'
+      : portraitUI
+        ? 'translateY(105%)'
+        : 'translateX(105%)',
+    opacity: trayOut ? 1 : 0,
+    transition: trayOut
+      ? `transform ${TRAY_IN}ms cubic-bezier(0.22, 1.08, 0.36, 1), opacity ${Math.round(
+          TRAY_IN * 0.45
+        )}ms ease-out`
+      : `transform ${TRAY_OUT}ms cubic-bezier(0.4, 0, 0.9, 1), opacity ${TRAY_OUT}ms ease-in`,
+    willChange: 'transform'
+  });
 
   return (
     <div
       style={{
         background: domStage.bg,
         color: domStage.ink,
-        transition: 'background-color 700ms ease, color 700ms ease'
+        // Pinned for a screenshot there is nothing to ease from, and a
+        // 700ms fade would be caught half done.
+        transition:
+          pinned.current !== null
+            ? 'none'
+            : 'background-color 700ms ease, color 700ms ease'
       }}
     >
-      <div ref={scrollRef} style={{ height: `${STATES * 90}dvh` }} className="relative">
+      <div
+        ref={scrollRef}
+        style={{ height: `${STATES * SCROLL_PER_STATE}dvh` }}
+        className="relative"
+      >
         <div
+          ref={stageElRef}
           className="sticky top-0 h-dvh overflow-hidden"
           onClick={pickStrand}
           // A second mousedown is what starts the browser's word selection.
@@ -1511,6 +2173,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                     })
                   }
                   aria-label="UP27, back to the top"
+                  ref={brandElRef}
                   className="flex items-stretch gap-4 text-left"
                 >
                   {/* The mark: six turns of thread in the kalawa's colours,
@@ -1542,7 +2205,7 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                     <div
                       className="font-mono-term font-semibold"
                       style={{
-                        fontSize: BRAND_SIZE,
+                        fontSize: portraitUI ? PORTRAIT_UI.brand : BRAND_SIZE,
                         lineHeight: 0.88,
                         letterSpacing: '-0.04em'
                       }}
@@ -1551,77 +2214,197 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                     </div>
                     <div
                       className="flex items-center gap-3"
-                      style={{ marginTop: BRAND_CAPTION_SHIFT }}
+                      style={{
+                        marginTop: portraitUI
+                          ? PORTRAIT_UI.brandCaption
+                          : BRAND_CAPTION_SHIFT
+                      }}
                     >
-                      <span className="h-px w-8 bg-current opacity-50" aria-hidden="true" />
-                      <span className="font-mono-term text-[11px] uppercase tracking-[0.26em] opacity-60">
-                        Vidhan Sabha / 403 seats
+                      <span
+                        className="h-px w-8 bg-current opacity-50 shrink-0"
+                        aria-hidden="true"
+                      />
+                      {/*
+                        The full line wraps to three at phone width and pushes
+                        the nav off the screen, so portrait carries the half
+                        that is not already said by the wordmark.
+                      */}
+                      <span
+                        className={`font-mono-term uppercase opacity-60 whitespace-nowrap ${
+                          portraitUI
+                            ? 'text-[10px] tracking-[0.16em]'
+                            : 'text-[11px] tracking-[0.26em]'
+                        }`}
+                      >
+                        {portraitUI ? '403 seats' : 'Vidhan Sabha / 403 seats'}
                       </span>
                     </div>
                   </div>
                 </button>
-                <img
-                  src={MAP_IMAGE}
-                  alt="District map of Uttar Pradesh"
-                  width={2048}
-                  height={2048}
+                {/*
+                  The map and its district layer move as one, so the transform
+                  that used to sit on the image sits on the pair instead and
+                  the outlines cannot drift off the painting underneath.
+                */}
+                <div
                   style={{
-                    width: MAP_WIDTH,
-                    height: 'auto',
+                    position: 'relative',
+                    width: mapWidth,
+                    height: mapWidth,
+                    // On a phone it is a locator for the opening section and
+                    // nothing after: left up, it sits under every formation.
+                    opacity: portraitUI && active !== 0 ? 0 : 1,
+                    pointerEvents: portraitUI && active !== 0 ? 'none' : undefined,
                     // Shrinks into the corner as the page leaves section A.
                     transformOrigin: 'top left',
                     // The title's inset is cancelled at whatever scale the
                     // map is drawn at, so it stays flush with the mark above
                     // in both the large and the shrunk state.
                     transform:
-                      active === 0
-                        ? `translate(${-MAP_TITLE_INSET * MAP_WIDTH}px, 0px) scale(1)`
+                      active === 0 || portraitUI
+                        ? `translate(${-MAP_TITLE_INSET * mapWidth}px, 0px) scale(1)`
                         : `translate(${
                             MAP_CORNER[0] -
-                            MAP_SCROLLED_SCALE * MAP_TITLE_INSET * MAP_WIDTH
+                            MAP_SCROLLED_SCALE * MAP_TITLE_INSET * mapWidth
                           }px, ${MAP_CORNER[1]}px) scale(${MAP_SCROLLED_SCALE})`,
-                    transition: 'transform 500ms cubic-bezier(0.4, 0, 0.2, 1)',
-                    pointerEvents: 'none'
+                    transition:
+                      'transform 500ms cubic-bezier(0.4, 0, 0.2, 1), opacity 400ms ease'
                   }}
-                />
+                >
+                  <img
+                    src={MAP_IMAGE}
+                    alt="District map of Uttar Pradesh"
+                    width={2048}
+                    height={2048}
+                    style={{
+                      width: mapWidth,
+                      height: 'auto',
+                      display: 'block',
+                      pointerEvents: 'none'
+                    }}
+                  />
+                  {/*
+                    One path per district, in artwork units. Only live on the
+                    opening section: once the map has shrunk into the corner
+                    it is a locator, not a control.
+                  */}
+                  <svg
+                    viewBox="0 0 2048 2048"
+                    width={mapWidth}
+                    height={mapWidth}
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 0,
+                      // Only where there is a pointer. On the phone the map
+                      // is 132px across, which puts a district at about ten
+                      // pixels: too small to aim at honestly.
+                      pointerEvents: active === 0 && !portraitUI ? 'auto' : 'none',
+                      opacity: active === 0 ? 1 : 0,
+                      transition: 'opacity 300ms ease-out'
+                    }}
+                    onMouseLeave={() => setHoverDistrict(null)}
+                  >
+                    {DISTRICT_SHAPES.map((shape) => {
+                      const isPicked = district?.name === shape.name;
+                      const isHover = hoverDistrict === shape.name;
+                      const tint = `rgba(${toRgb(accent).join(',')},${
+                        isPicked
+                          ? DISTRICT_HOVER.fillPicked
+                          : isHover
+                            ? DISTRICT_HOVER.fill
+                            : 0
+                      })`;
+                      return (
+                        <path
+                          key={shape.name}
+                          d={districtPath(shape, 2048)}
+                          fill={tint}
+                          stroke={tint}
+                          strokeWidth={DISTRICT_HOVER.stroke}
+                          strokeLinejoin="round"
+                          style={{ pointerEvents: 'all', cursor: 'pointer' }}
+                          onMouseEnter={() => setHoverDistrict(shape.name)}
+                          onClick={(e) => {
+                            // The map sits inside the surface that picks a
+                            // strand on click. Without this the pick runs
+                            // straight after and takes the tray back off the
+                            // district you just chose.
+                            e.stopPropagation();
+                            setPicked(null);
+                            setDistrict(shape);
+                            setPickSeq((n) => n + 1);
+                          }}
+                        >
+                          <title>{`${shape.name} — ${shape.seats.length} ${
+                            shape.seats.length === 1 ? 'seat' : 'seats'
+                          }`}</title>
+                        </path>
+                      );
+                    })}
+                  </svg>
+                </div>
               </div>
-              <nav aria-label="Jump into the terminal" className="flex flex-col items-end gap-1.5">
+              {/*
+                Four links stacked are 160px of column, which reaches well
+                into the artwork band on a phone. Wrapped into two short rows
+                the header stays above the band and nothing crosses it.
+              */}
+              <nav
+                ref={navElRef}
+                aria-label="Jump into the terminal"
+                className={
+                  portraitUI
+                    ? 'flex flex-row flex-wrap justify-end gap-x-3 gap-y-0.5'
+                    : 'flex flex-col items-end gap-1.5 shrink-0'
+                }
+              >
                 {NAV.map((item) => (
                   <button
                     key={item.tab}
                     type="button"
                     onClick={() => onEnter(item.tab)}
-                    className="group flex items-center gap-1.5 font-mono-term font-semibold text-[17px] tracking-[0.02em] hover:opacity-70"
+                    className={`group flex items-center gap-1.5 font-mono-term font-semibold tracking-[0.02em] hover:opacity-70 ${
+                      portraitUI ? 'text-[12px]' : 'text-[17px]'
+                    }`}
                   >
                     {item.label}
-                    <span aria-hidden="true" className="opacity-70">
-                      &#8599;
-                    </span>
+                    {/*
+                      The arrow is 14px a link, which is the difference
+                      between two rows of nav and four on a phone. The links
+                      read as links from their place in the header.
+                    */}
+                    {!portraitUI && (
+                      <span aria-hidden="true" className="opacity-70">
+                        &#8599;
+                      </span>
+                    )}
                   </button>
                 ))}
               </nav>
             </div>
 
-            <div className="flex-1 flex items-center">
+            <div
+              className={`flex-1 flex ${portraitUI ? 'items-end' : 'items-center'}`}
+            >
               <div className="w-full flex items-center justify-between gap-8">
-                <div className="max-w-[34rem]">
+                <div ref={copyElRef} className="max-w-[34rem]">
                   <h1 className="font-display text-[clamp(2.25rem,5.2vw,4rem)] leading-[1.04]">
                     {section.lead}{' '}
                     <span className="italic font-normal">{section.italic}</span>
                     <br />
                     {section.tail}
                   </h1>
-                  <p className="mt-6 max-w-sm text-sm leading-relaxed opacity-75">
+                  <p
+                    className={`max-w-sm text-sm leading-relaxed opacity-75 ${
+                      portraitUI ? 'mt-4' : 'mt-6'
+                    }`}
+                  >
                     {section.body}
                   </p>
-                  {active === 1 && (
-                    <div className="mt-8">
-                      <EmploymentChart />
-                    </div>
-                  )}
-
                   {active === 0 && (
-                    <div className="mt-8 max-w-sm">
+                    <div className={`max-w-sm ${portraitUI ? 'mt-5' : 'mt-8'}`}>
                       <div className="flex items-baseline justify-between gap-3 mb-2">
                         <span className="font-mono-term text-[10px] uppercase tracking-[0.16em] opacity-60">
                           Trillion dollar target
@@ -1644,7 +2427,11 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                           background: accent
                         }}
                       />
-                      <p className="mt-3 text-[13px] leading-relaxed opacity-70">
+                      <p
+                        className={`text-[13px] leading-relaxed opacity-70 ${
+                          portraitUI ? 'mt-2' : 'mt-3'
+                        }`}
+                      >
                         Rs {TRILLION.nowCrore} lakh crore in {TRILLION.nowYear},
                         against the Rs {TRILLION.targetCrore} lakh crore a
                         trillion dollars takes. The target year has moved from{' '}
@@ -1693,6 +2480,84 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
               />
             </div>
 
+            {active === STATES - 1 && (
+              <div className="absolute right-16 bottom-36 hidden lg:block w-[380px]">
+                <EmploymentChart />
+              </div>
+            )}
+
+            {/*
+              The map's tray: the district you clicked, and the seats it
+              holds. Picking one of them hands over to the member tray below,
+              which keeps a way back here.
+            */}
+            {district && !picked && (
+              <aside
+                aria-label={`Seats in ${district.name}`}
+                className={`overflow-hidden ${
+                  portraitUI
+                    ? 'absolute left-0 right-0 bottom-0 px-6 pt-4 pb-6 rounded-t-xl'
+                    : 'absolute right-0 bottom-24 w-80 pl-6 pr-7 py-5 rounded-l-xl'
+                }`}
+                style={trayShell(accent)}
+              >
+                <div className="flex items-baseline justify-between gap-3 mb-1">
+                  <span className="font-mono-term text-[10px] uppercase tracking-[0.18em] opacity-60">
+                    District
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setTrayOut(false)}
+                    className="font-mono-term text-[11px] opacity-50 hover:opacity-100"
+                    aria-label="Close"
+                  >
+                    &#10005;
+                  </button>
+                </div>
+                <div className="font-display text-xl leading-tight">
+                  {district.name}
+                </div>
+                <div className="font-mono-term text-[11px] opacity-60 mb-3">
+                  {district.seats.length}{' '}
+                  {district.seats.length === 1 ? 'seat' : 'seats'}
+                </div>
+                <ul className="max-h-60 overflow-y-auto -mr-2 pr-2">
+                  {districtSeats.map(({ ac, row, seat }) => {
+                    const party = row?.party ?? 'OTH';
+                    return (
+                      <li key={ac}>
+                        <button
+                          type="button"
+                          disabled={!seat}
+                          onClick={() => {
+                            if (!seat) return;
+                            setPicked(seat);
+                            setPickSeq((n) => n + 1);
+                          }}
+                          className="w-full flex items-center gap-2.5 py-1.5 text-left hover:opacity-100 opacity-85 disabled:opacity-40"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ background: dayColour(party) }}
+                          />
+                          <span className="font-mono-term text-[10px] tabular-nums opacity-50 w-7 shrink-0">
+                            {ac}
+                          </span>
+                          <span className="text-[13px] truncate">
+                            {row?.seat ?? seat?.name ?? '\u2014'}
+                          </span>
+                          <span className="ml-auto font-mono-term text-[10px] opacity-55 shrink-0">
+                            {party}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </aside>
+            )}
+
             {picked && (() => {
               const row = mlaByAc(picked.acNumber);
               const party = row?.party ?? picked.mlaParty;
@@ -1702,29 +2567,23 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                 <aside
                   role="status"
                   aria-live="polite"
-                  className="absolute right-0 bottom-24 w-80 pl-6 pr-7 py-5 rounded-l-xl overflow-hidden"
-                  style={{
-                    background: withAlpha(domStage.bg, 0.52),
-                    backdropFilter: 'blur(24px) saturate(180%)',
-                    WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-                    color: domStage.ink,
-                    borderTop: `1px solid ${withAlpha(domStage.ink, 0.14)}`,
-                    borderBottom: `1px solid ${withAlpha(domStage.ink, 0.14)}`,
-                    borderLeft: `3px solid ${edge}`,
-                    boxShadow: `-18px 0 60px rgba(0,0,0,0.3), inset 0 1px 0 ${withAlpha(
-                      domStage.ink,
-                      0.12
-                    )}`,
-                    transform: trayOut ? 'translateX(0)' : 'translateX(105%)',
-                    opacity: trayOut ? 1 : 0,
-                    transition: trayOut
-                      ? `transform ${TRAY_IN}ms cubic-bezier(0.22, 1.08, 0.36, 1), opacity ${Math.round(
-                          TRAY_IN * 0.45
-                        )}ms ease-out`
-                      : `transform ${TRAY_OUT}ms cubic-bezier(0.4, 0, 0.9, 1), opacity ${TRAY_OUT}ms ease-in`,
-                    willChange: 'transform'
-                  }}
+                  className={`overflow-hidden ${
+                  portraitUI
+                    ? 'absolute left-0 right-0 bottom-0 px-6 pt-4 pb-6 rounded-t-xl'
+                    : 'absolute right-0 bottom-24 w-80 pl-6 pr-7 py-5 rounded-l-xl'
+                }`}
+                  style={trayShell(edge)}
                 >
+                  {district && (
+                    <button
+                      type="button"
+                      onClick={() => setPicked(null)}
+                      className="flex items-center gap-1.5 mb-2 font-mono-term text-[11px] opacity-60 hover:opacity-100"
+                    >
+                      <span aria-hidden="true">&#8592;</span>
+                      {district.name}
+                    </button>
+                  )}
                   <div className="flex items-baseline justify-between gap-3 mb-3">
                     <span className="font-mono-term text-[10px] uppercase tracking-[0.18em] opacity-60">
                       {vacant ? 'Seat' : 'Member'}
@@ -1842,9 +2701,12 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                       className="h-full w-full origin-left"
                       style={{
                         background: edge,
-                        animation: trayOut
-                          ? `tray-timer ${CARD_DWELL}ms linear forwards`
-                          : 'none'
+                        // Only a strand pick times out. Opened from the map
+                        // the tray waits, so there is no bar to run down.
+                        animation:
+                          trayOut && !district
+                            ? `tray-timer ${CARD_DWELL}ms linear forwards`
+                            : 'none'
                       }}
                     />
                   </div>
@@ -1868,21 +2730,32 @@ export const Landing: React.FC<LandingProps> = ({ allConstituencies, onEnter }) 
                     </li>
                   ))}
                 </ul>
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <button
                     type="button"
                     onClick={() => onEnter('bubbles')}
-                    className="font-mono-term text-[11px] uppercase tracking-[0.14em] opacity-60 hover:opacity-100"
+                    className="font-mono-term text-[11px] uppercase tracking-[0.14em] opacity-60 hover:opacity-100 whitespace-nowrap"
                   >
                     Skip to terminal
                   </button>
-                  <span className="font-mono-term text-[11px] uppercase tracking-[0.14em] opacity-45">
+                  <span className="font-mono-term text-[11px] uppercase tracking-[0.14em] opacity-45 whitespace-nowrap">
                     Sample dataset
                   </span>
+                  {/*
+                    On a phone the counter wraps onto a row of its own and
+                    that row falls off the bottom, so it rides along here.
+                  */}
+                  {portraitUI && (
+                    <span className="font-mono-term tnum text-[11px] tracking-[0.12em] opacity-60 whitespace-nowrap">
+                      [ 00{active + 1} /00{STATES} ]
+                    </span>
+                  )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-4">
+              <div
+                className={`items-center gap-4 ${portraitUI ? 'hidden' : 'flex'}`}
+              >
                 <div
                   className="hidden sm:flex items-center gap-1.5"
                   role="progressbar"
