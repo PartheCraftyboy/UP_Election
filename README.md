@@ -157,17 +157,19 @@ To customize damping, scroll speeds, OkLab color stages, thread thickness, or st
 
 ## 🔐 SSH & GitHub Access
 
-To push or sync changes to your remote GitHub repository, make sure your GitHub account or repository Deploy Keys has this machine's public SSH key:
+To push or sync changes to your remote GitHub repository, add this machine's public SSH key to your repository's Deploy Keys (with write access) or to your personal GitHub account:
 
 ```text
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPzuzZYA7SnMnMOZjN5UQnimx5xY2LAUg9tdjjdwqXwt parthsvault@gmail.com
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPGyJEDmWhIb7NPQqhi5LSv7UiD7VNNrf5lKzrdHB1p+ parthsvault+up_election@gmail.com
 ```
 
-Test your authentication at any time with:
-```bash
-ssh -T git@github.com
-```
-*(Authenticated as `PartheCraftyboy`)*
+### Adding the Key to GitHub:
+1. Navigate to: [github.com/PartheCraftyboy/UP_Election/settings/keys](https://github.com/PartheCraftyboy/UP_Election/settings/keys)
+2. Click **Add deploy key**
+3. Title: `UP_Election Machine Key`
+4. Paste the key above into the **Key** field
+5. Check **"Allow write access"** and click **Add key**
+*(Alternatively, add it under your personal GitHub [Settings -> SSH and GPG keys](https://github.com/settings/keys) for universal access across all your repos)*
 
 ---
 
